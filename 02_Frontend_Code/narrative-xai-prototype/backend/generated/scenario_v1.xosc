@@ -1,0 +1,183 @@
+<?xml version='1.0' encoding='utf-8'?>
+<OpenSCENARIO xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="OpenScenario.xsd">
+    <FileHeader description="Narrative XAI generated lead-brake scenario" author="Sadia Aman" revMajor="1" revMinor="1" date="2026-06-12T02:14:04.524666"/>
+    <ParameterDeclarations>
+        <ParameterDeclaration name="HostVehicle" parameterType="string" value="car_white"/>
+        <ParameterDeclaration name="HostSpeed" parameterType="double" value="27.78"/>
+        <ParameterDeclaration name="WeatherCondition" parameterType="string" value="fog"/>
+        <ParameterDeclaration name="NPCType" parameterType="string" value="truck"/>
+        <ParameterDeclaration name="NPCBehaviour" parameterType="string" value="brakes suddenly"/>
+        <ParameterDeclaration name="EgoResponse" parameterType="string" value="slows down"/>
+    </ParameterDeclarations>
+    <CatalogLocations>
+        <VehicleCatalog>
+            <Directory path="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/xosc/Catalogs/Vehicles"/>
+        </VehicleCatalog>
+    </CatalogLocations>
+    <RoadNetwork>
+        <LogicFile filepath="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/xodr/e6mini.xodr"/>
+        <SceneGraphFile filepath="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/models/e6mini.osgb"/>
+    </RoadNetwork>
+    <Entities>
+        <ScenarioObject name="Ego">
+            <CatalogReference catalogName="VehicleCatalog" entryName="car_white"/>
+        </ScenarioObject>
+        <ScenarioObject name="NPC">
+            <CatalogReference catalogName="VehicleCatalog" entryName="truck_yellow"/>
+        </ScenarioObject>
+    </Entities>
+    <Storyboard>
+        <Init>
+            <Actions>
+                <GlobalAction>
+                    <EnvironmentAction>
+                        <Environment name="GeneratedEnvironment">
+                            <TimeOfDay animation="false" dateTime="2026-06-07T12:00:00"/>
+                            <Weather cloudState="free">
+                                <Sun azimuth="0.0" intensity="1.0" elevation="1.31"/>
+                                <Fog visualRange="300.0"/>
+                                <Precipitation precipitationType="dry" precipitationIntensity="0.0"/>
+                            </Weather>
+                            <RoadCondition frictionScaleFactor="0.8"/>
+                        </Environment>
+                    </EnvironmentAction>
+                </GlobalAction>
+                <Private entityRef="Ego">
+                    <PrivateAction>
+                        <TeleportAction>
+                            <Position>
+                                <LanePosition roadId="0" laneId="-3" s="0.0" offset="0.0"/>
+                            </Position>
+                        </TeleportAction>
+                    </PrivateAction>
+                    <PrivateAction>
+                        <LongitudinalAction>
+                            <SpeedAction>
+                                <SpeedActionDynamics dynamicsShape="step" value="0.0" dynamicsDimension="time"/>
+                                <SpeedActionTarget>
+                                    <AbsoluteTargetSpeed value="27.78"/>
+                                </SpeedActionTarget>
+                            </SpeedAction>
+                        </LongitudinalAction>
+                    </PrivateAction>
+                </Private>
+                <Private entityRef="NPC">
+                    <PrivateAction>
+                        <TeleportAction>
+                            <Position>
+                                <LanePosition roadId="0" laneId="-3" s="30.0" offset="0.0"/>
+                            </Position>
+                        </TeleportAction>
+                    </PrivateAction>
+                    <PrivateAction>
+                        <LongitudinalAction>
+                            <SpeedAction>
+                                <SpeedActionDynamics dynamicsShape="step" value="0.0" dynamicsDimension="time"/>
+                                <SpeedActionTarget>
+                                    <AbsoluteTargetSpeed value="27.78"/>
+                                </SpeedActionTarget>
+                            </SpeedAction>
+                        </LongitudinalAction>
+                    </PrivateAction>
+                </Private>
+            </Actions>
+        </Init>
+        <Story name="GeneratedLeadBrakeStory">
+            <Act name="GeneratedLeadBrakeAct">
+                <ManeuverGroup name="npc_brake_group" maximumExecutionCount="1">
+                    <Actors selectTriggeringEntities="false">
+                        <EntityRef entityRef="NPC"/>
+                    </Actors>
+                    <Maneuver name="npc_brake_maneuver">
+                        <Event name="npc_brake_event" priority="overwrite" maximumExecutionCount="1">
+                            <Action name="npc_brake_action">
+                                <PrivateAction>
+                                    <LongitudinalAction>
+                                        <SpeedAction>
+                                            <SpeedActionDynamics dynamicsShape="linear" value="-6.0" dynamicsDimension="rate"/>
+                                            <SpeedActionTarget>
+                                                <AbsoluteTargetSpeed value="0.0"/>
+                                            </SpeedActionTarget>
+                                        </SpeedAction>
+                                    </LongitudinalAction>
+                                </PrivateAction>
+                            </Action>
+                            <StartTrigger>
+                                <ConditionGroup>
+                                    <Condition name="npc_brake_start_condition" delay="0.0" conditionEdge="rising">
+                                        <ByEntityCondition>
+                                            <TriggeringEntities triggeringEntitiesRule="any">
+                                                <EntityRef entityRef="Ego"/>
+                                            </TriggeringEntities>
+                                            <EntityCondition>
+                                                <TraveledDistanceCondition value="15.0"/>
+                                            </EntityCondition>
+                                        </ByEntityCondition>
+                                    </Condition>
+                                </ConditionGroup>
+                            </StartTrigger>
+                        </Event>
+                    </Maneuver>
+                </ManeuverGroup>
+                <ManeuverGroup name="ego_brake_group" maximumExecutionCount="1">
+                    <Actors selectTriggeringEntities="false">
+                        <EntityRef entityRef="Ego"/>
+                    </Actors>
+                    <Maneuver name="ego_brake_maneuver">
+                        <Event name="ego_brake_event" priority="overwrite" maximumExecutionCount="1">
+                            <Action name="ego_brake_action">
+                                <PrivateAction>
+                                    <LongitudinalAction>
+                                        <SpeedAction>
+                                            <SpeedActionDynamics dynamicsShape="linear" value="-5.5" dynamicsDimension="rate"/>
+                                            <SpeedActionTarget>
+                                                <AbsoluteTargetSpeed value="0.0"/>
+                                            </SpeedActionTarget>
+                                        </SpeedAction>
+                                    </LongitudinalAction>
+                                </PrivateAction>
+                            </Action>
+                            <StartTrigger>
+                                <ConditionGroup>
+                                    <Condition name="ego_brake_condition" delay="0.0" conditionEdge="rising">
+                                        <ByEntityCondition>
+                                            <TriggeringEntities triggeringEntitiesRule="any">
+                                                <EntityRef entityRef="Ego"/>
+                                            </TriggeringEntities>
+                                            <EntityCondition>
+                                                <TimeToCollisionCondition value="1.5" relativeDistanceType="longitudinal" coordinateSystem="entity" freespace="true" rule="lessThan">
+                                                    <TimeToCollisionConditionTarget>
+                                                        <EntityRef entityRef="NPC"/>
+                                                    </TimeToCollisionConditionTarget>
+                                                </TimeToCollisionCondition>
+                                            </EntityCondition>
+                                        </ByEntityCondition>
+                                    </Condition>
+                                </ConditionGroup>
+                            </StartTrigger>
+                        </Event>
+                    </Maneuver>
+                </ManeuverGroup>
+                <StartTrigger>
+                    <ConditionGroup>
+                        <Condition name="ActStartCondition" delay="0.0" conditionEdge="none">
+                            <ByValueCondition>
+                                <SimulationTimeCondition value="0.0" rule="greaterThan"/>
+                            </ByValueCondition>
+                        </Condition>
+                    </ConditionGroup>
+                </StartTrigger>
+                <StopTrigger/>
+            </Act>
+        </Story>
+        <StopTrigger>
+            <ConditionGroup>
+                <Condition name="QuitCondition" delay="0.0" conditionEdge="rising">
+                    <ByValueCondition>
+                        <SimulationTimeCondition value="20.0" rule="greaterThan"/>
+                    </ByValueCondition>
+                </Condition>
+            </ConditionGroup>
+        </StopTrigger>
+    </Storyboard>
+</OpenSCENARIO>

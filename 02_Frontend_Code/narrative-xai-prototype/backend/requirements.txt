@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+pydantic
+# Optional next step for real XOSC/XODR generation:
+# scenariogeneration

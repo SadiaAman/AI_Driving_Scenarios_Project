@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Narrative XAI Driving Scenario Prototype</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="page">
+    <div class="breadcrumb">Presented file ›</div>
+
+    <section class="card">
+      <div class="header-row">
+        <h1>New scenario</h1>
+        <div class="badges"><span>Esmini</span><span>OpenSCENARIO 1.2</span></div>
+      </div>
+
+      <div class="grid two">
+        <label>Ego vehicle speed
+          <select id="egoSpeed">
+	    <option value="" selected disabled>Select ego vehicle speed</option>
+            <option value="30">30 km/h</option>
+            <option value="50">50 km/h</option>
+            <option value="80">80 km/h</option>
+            <option value="100">100 km/h</option>
+          </select>
+        </label>
+        <label>Number of traffic vehicles
+          <select id="trafficVehicles">
+	    <option value="" selected disabled>Select number of traffic vehicles</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </label>
+      </div>
+
+      <hr />
+      <h2>Scenario builder</h2>
+
+      <div class="grid two">
+        <label>Weather conditions
+          <select id="weather">
+	    <option value="" selected disabled>Select weather condition</option>
+            <option value="rain">rain</option>
+            <option value="clear">clear</option>
+            <option value="fog">fog</option>
+            <option value="snow">snow</option>
+          </select>
+          <small>Affects visibility and friction.</small>
+        </label>
+        <label>NPC vehicle type
+          <select id="npcType">
+	    <option value="" selected disabled>Select NPC vehicle type</option>
+            <option value="fast car">a fast car</option>
+            <option value="truck">a truck</option>
+            <option value="pedestrian">a pedestrian</option>
+            <option value="cyclist">a cyclist</option>
+          </select>
+          <small>The main other actor in the scene.</small>
+        </label>
+        <label>NPC behaviour
+          <select id="npcBehavior">
+	    <option value="" selected disabled>Select NPC behaviour</option>
+            <option value="brakes suddenly">brakes suddenly</option>
+            <option value="changes lane suddenly">changes lane suddenly</option>
+            <option value="crosses the road">crosses the road</option>
+            <option value="cuts in front of ego">cuts in front of ego</option>
+          </select>
+          <small>What does the NPC do?</small>
+        </label>
+        <label>Ego vehicle response
+          <select id="egoResponse">
+	    <option value="" selected disabled>Select ego vehicle response</option>
+            <option value="steers to avoid">steers to avoid</option>
+            <option value="brakes immediately">brakes immediately</option>
+            <option value="slows down">slows down</option>
+            <option value="keeps lane and reduces speed">keeps lane and reduces speed</option>
+          </select>
+          <small>How should the ego vehicle react?</small>
+        </label>
+      </div>
+
+      <label>Generated prompt preview</label>
+      <div id="promptPreview" class="prompt-box"></div>
+
+      <div class="grid two status-grid">
+        <div class="panel">
+          <h3>Esmini readiness checklist</h3>
+          <ul id="checklist"></ul>
+        </div>
+        <div class="panel">
+          <h3>Prompt completeness</h3>
+          <div class="progress"><div id="progressBar"></div></div>
+          <strong id="progressText">0%</strong>
+          <p id="progressMessage">Please complete all required fields.</p>
+        </div>
+      </div>
+
+      <div class="action-row">
+        <label class="checkbox"><input id="autoValidate" type="checkbox" checked /> Auto-validate in Esmini</label>
+        <button id="generateBtn" disabled>Complete all fields first</button>
+      </div>
+
+      <hr />
+      <h2>Pipeline</h2>
+      <div class="pipeline">
+        <div>✓<br><span>Prompt<br>parsing</span></div>
+        <div>✓<br><span>XOSC<br>generation</span></div>
+        <div>✓<br><span>Esmini<br>validation</span></div>
+        <div>✓<br><span>LLM<br>refinement</span></div>
+        <div>✓<br><span>Export<br>ready</span></div>
+      </div>
+      <pre id="logBox" class="log">Waiting for scenario generation...</pre>
+    </section>
+
+    <section id="resultCard" class="card hidden">
+      <div class="header-row">
+        <div>
+          <h1 id="fileName">scenario_v1.xosc</h1>
+          <p id="fileMeta">Generated just now</p>
+        </div>
+        <div class="badges"><span class="valid">Valid</span><span>Iteration 1</span></div>
+      </div>
+      <pre id="xmlPreview" class="code"></pre>
+      <label>Refine with a follow-up prompt</label>
+      <div class="refine-row">
+        <input id="refineText" placeholder="e.g. Make the car merge more aggressively..." />
+        <button id="refineBtn">Refine</button>
+      </div>
+      <div class="button-row">
+        <button id="improveBtn">Improve actor behavior ↗</button>
+        <button id="compareBtn">Compare versions</button>
+        <button id="exportBtn">Export XOSC</button>
+        <button id="runBtn">Run in esmini</button>
+      </div>
+      <button class="secondary" onclick="window.scrollTo({top:0,behavior:'smooth'})">← Start new scenario</button>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

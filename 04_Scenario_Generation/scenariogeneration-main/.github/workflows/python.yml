@@ -1,0 +1,240 @@
+name: Python checks
+
+on:
+  push:
+    paths:
+      - .github/workflows/python.yml
+      - '**.py'
+      - requirements.txt
+      - schemas/**/*.xsd
+      - pyproject.toml
+  pull_request:
+    paths:
+      - .github/workflows/python.yml
+      - '**.py'
+      - requirements.txt
+      - schemas/**/*.xsd
+      - pyproject.toml
+  workflow_dispatch:
+
+jobs:
+  black:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install black
+        run: python3 -m pip install black
+
+      - name: Run black
+        run: |
+          shopt -s globstar
+          python3 -m black --check **/*.py
+
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pytest
+        run: python3 -m pip install pytest
+      - name: Install lxml
+        run: python3 -m pip install lxml
+      - name: Install requirements
+        run: python3 -m pip install -r requirements.txt
+      - name: Run tests
+        run: python3 -m pytest tests/
+
+  xodr_examples:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install requirements
+        run: python3 -m pip install -r requirements.txt
+      - name: Install scenariogeneration
+        run: python3 -m pip install .
+      - name: common_junction_creator
+        if: always()
+        run: python3 examples/xodr/common_junction_creator.py
+      - name: direct_junction_creator
+        if: always()
+        run: python3 examples/xodr/direct_junction_creator.py
+      - name: full_junction
+        if: always()
+        run: python3 examples/xodr/full_junction.py
+      - name: highway_example_with_merge_and_split
+        if: always()
+        run: python3 examples/xodr/highway_example_with_merge_and_split.py
+      - name: highway_example
+        if: always()
+        run: python3 examples/xodr/highway_example.py
+      - name: highway_exit_with_lane_types
+        if: always()
+        run: python3 examples/xodr/highway_exit_with_lane_types.py
+      - name: junction_trippel_twoway
+        if: always()
+        run: python3 examples/xodr/junction_trippel_twoway.py
+      - name: junction_with_signals
+        if: always()
+        run: python3 examples/xodr/junction_with_signals.py
+      - name: lane_number_change_merge
+        if: always()
+        run: python3 examples/xodr/lane_number_change_merge.py
+      - name: manual_add_of_geometries
+        if: always()
+        run: python3 examples/xodr/manual_add_of_geometries.py
+      - name: multiple_geometries_one_road_with_objects
+        if: always()
+        run: python3 examples/xodr/multiple_geometries_one_road_with_objects.py
+      - name: multiple_geometries_one_road
+        if: always()
+        run: python3 examples/xodr/multiple_geometries_one_road.py
+      - name: road_link_unequal_number_of_lanes
+        if: always()
+        run: python3 examples/xodr/road_link_unequal_number_of_lanes.py
+      - name: road_merge_w_lane_merge
+        if: always()
+        run: python3 examples/xodr/road_merge_w_lane_merge.py
+      - name: road_merge
+        if: always()
+        run: python3 examples/xodr/road_merge.py
+      - name: road_split_w_lane_split
+        if: always()
+        run: python3 examples/xodr/road_split_w_lane_split.py
+      - name: road_split
+        if: always()
+        run: python3 examples/xodr/road_split.py
+      - name: road_with_custom_lanes
+        if: always()
+        run: python3 examples/xodr/road_with_custom_lanes.py
+      - name: road_with_custom_roadmarkers
+        if: always()
+        run: python3 examples/xodr/road_with_custom_roadmarkers.py
+      - name: simple_road_with_objects
+        if: always()
+        run: python3 examples/xodr/simple_road_with_objects.py
+      - name: two_roads
+        if: always()
+        run: python3 examples/xodr/two_roads.py
+      - name: road_with_multiple_lane_widths
+        if: always()
+        run: python3 examples/xodr/road_with_multiple_lane_widths.py
+      - name: junction_with_varying_lane_widths
+        if: always()
+        run: python3 examples/xodr/junction_with_varying_lane_widths.py
+      - name: road_with_changing_lane_width
+        if: always()
+        run: python3 examples/xodr/road_with_changing_lane_width.py
+      - name: full_junction_with_LaneDef
+        if: always()
+        run: python3 examples/xodr/full_junction_with_LaneDef.py
+
+  xosc_examples:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install requirements
+        run: python3 -m pip install -r requirements.txt
+      - name: Install scenariogeneration
+        run: python3 -m pip install .
+      - name: Acceleration_condition
+        if: always()
+        run: python3 examples/xosc/Acceleration_condition.py
+      - name: catalog_example
+        if: always()
+        run: python3 examples/xosc/catalog_example.py
+      - name: end_of_road_reset_traffic
+        if: always()
+        run: python3 examples/xosc/end_of_road_reset_traffic.py
+      - name: multi_conditional_and_triggers
+        if: always()
+        run: python3 examples/xosc/multi_conditional_and_triggers.py
+      - name: multi_conditional_different_actions
+        if: always()
+        run: python3 examples/xosc/multi_conditional_different_actions.py
+      - name: multi_conditional_or_triggers
+        if: always()
+        run: python3 examples/xosc/multi_conditional_or_triggers.py
+      - name: multiple_maneuvers
+        if: always()
+        run: python3 examples/xosc/multiple_maneuvers.py
+      - name: one_action_example
+        if: always()
+        run: python3 examples/xosc/one_action_example.py
+      - name: parallel_distance_actions
+        if: always()
+        run: python3 examples/xosc/parallel_distance_actions.py
+      - name: ParameterValueDistribution
+        if: always()
+        run: python3 examples/xosc/ParameterValueDistribution.py
+      - name: route_in_crossing
+        if: always()
+        run: python3 examples/xosc/route_in_crossing.py
+      - name: Speed_condition
+        if: always()
+        run: python3 examples/xosc/Speed_condition.py
+      - name: Stop_on_offroad
+        if: always()
+        run: python3 examples/xosc/Stop_on_offroad.py
+      - name: syncronize_straight_example
+        if: always()
+        run: python3 examples/xosc/syncronize_straight_example.py
+      - name: trajectory_example
+        if: always()
+        run: python3 examples/xosc/trajectory_example.py
+      - name: withcontroller
+        if: always()
+        run: python3 examples/xosc/withcontroller.py
+
+
+  generator_examples:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install requirements
+        run: python3 -m pip install -r requirements.txt
+      - name: Install scenariogeneration
+        run: python3 -m pip install .
+      - name: CCRb
+        if: always()
+        run: python3 examples/generator/CCRb.py
+      - name: CCRm
+        if: always()
+        run: python3 examples/generator/CCRm.py
+      - name: CCRs
+        if: always()
+        run: python3 examples/generator/CCRs.py
+      - name: generate_from_main
+        if: always()
+        run: python3 examples/generator/generate_from_main.py
+      - name: generate_with_fixed_parameter_sets
+        if: always()
+        run: python3 examples/generator/generate_with_fixed_parameter_sets.py
+      - name: generate_with_permutations
+        if: always()
+        run: python3 examples/generator/generate_with_permutations.py
