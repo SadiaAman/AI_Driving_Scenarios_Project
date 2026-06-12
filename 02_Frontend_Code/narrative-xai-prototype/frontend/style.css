@@ -44,7 +44,7 @@ button:hover { border-color: var(--green); }
 .pipeline { display:flex; justify-content:space-between; text-align:center; color: var(--green); font-weight: 800; margin: 16px 0; }
 .pipeline span { color: #55776b; font-size: 13px; font-weight: 700; }
 .log, .code { background: #f1f0ec; border-radius: 10px; padding: 18px; overflow:auto; line-height: 1.5; color: #3f3d38; }
-.code { min-height: 280px; }
+.code { min-height: 280px; max-height: 420px; overflow-y: auto; overflow-x: auto; }
 .refine-row input { flex: 1; min-width: 220px; }
 .hidden { display:none; }
 .secondary { margin-top: 16px; }

@@ -1,5 +1,5 @@
 fastapi
 uvicorn
 pydantic
-# Optional next step for real XOSC/XODR generation:
-# scenariogeneration
+# Used by scenario_builder.py for the gradual migration to programmatic XOSC.
+scenariogeneration==0.16.5

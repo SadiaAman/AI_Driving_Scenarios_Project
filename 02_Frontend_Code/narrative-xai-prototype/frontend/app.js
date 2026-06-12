@@ -1,5 +1,39 @@
 const API_BASE = "http://127.0.0.1:8000";
-const fields = ["egoSpeed", "trafficVehicles", "weather", "npcType", "npcBehavior", "egoResponse"];
+const fields = ["egoSpeed", "trafficVehicles", "weather", "timeOfDay", "npcType", "npcBehavior", "egoResponse"];
+let latestFilename = null;
+
+// Which behaviours make sense for each actor type. Pedestrians and cyclists
+// cross the road; cars and trucks drive ahead and can brake or change lane.
+// This keeps the generated prompt text and the actual simulation in sync.
+const NPC_BEHAVIOURS = {
+  pedestrian: ["crosses the road"],
+  cyclist: ["crosses the road"],
+  car: ["brakes suddenly", "changes lane suddenly", "cuts in front of ego"],
+  truck: ["brakes suddenly", "changes lane suddenly", "cuts in front of ego"]
+};
+
+// Rebuild the NPC behaviour dropdown to match the selected actor type.
+function updateBehaviourOptions() {
+  const npcType = document.getElementById("npcType").value;
+  const select = document.getElementById("npcBehavior");
+  const previous = select.value;
+  const allowed = NPC_BEHAVIOURS[npcType] || [];
+
+  select.innerHTML = '<option value="" selected disabled>Select NPC behaviour</option>';
+  for (const behaviour of allowed) {
+    const option = document.createElement("option");
+    option.value = behaviour;
+    option.textContent = behaviour;
+    select.appendChild(option);
+  }
+
+  // Keep the previous choice if it is still valid for the new actor type.
+  if (allowed.includes(previous)) {
+    select.value = previous;
+  }
+
+  updatePreview();
+}
 
 function getData() {
   return Object.fromEntries(fields.map(id => [id, document.getElementById(id).value]));
@@ -14,7 +48,7 @@ function makePrompt(d = getData()) {
     return "Please select all scenario parameters to generate a prompt.";
   }
 
-  return `The ego vehicle travelling at ${d.egoSpeed} km/h in ${d.weather} conditions. A ${d.npcType} ${d.npcBehavior}. The ego vehicle ${d.egoResponse}.`;
+  return `The ego vehicle is travelling at ${d.egoSpeed} km/h in ${d.weather} conditions during ${d.timeOfDay.toLowerCase()}. A ${d.npcType} ${d.npcBehavior}. The ego vehicle ${d.egoResponse}.`;
 }
 
 function updatePreview() {
@@ -29,6 +63,7 @@ function updatePreview() {
     { label: "Ego vehicle speed selected", done: !!d.egoSpeed },
     { label: "Number of traffic vehicles selected", done: !!d.trafficVehicles },
     { label: "Weather conditions set", done: !!d.weather },
+    { label: "Time of day chosen", done: !!d.timeOfDay },
     { label: "NPC actor specified", done: !!d.npcType },
     { label: "NPC behaviour described", done: !!d.npcBehavior },
     { label: "Ego response defined", done: !!d.egoResponse }
@@ -52,6 +87,9 @@ function updatePreview() {
 }
 
 fields.forEach(id => document.getElementById(id).addEventListener("change", updatePreview));
+// When the actor type changes, rebuild the behaviour list to match it.
+document.getElementById("npcType").addEventListener("change", updateBehaviourOptions);
+updateBehaviourOptions();
 updatePreview();
 
 async function generateScenario() {
@@ -82,7 +120,10 @@ async function generateScenario() {
 
     document.getElementById("logBox").textContent = result.pipeline_log.join("\n");
     document.getElementById("resultCard").classList.remove("hidden");
-    document.getElementById("fileName").textContent = result.filename;
+    const fileLink = document.getElementById("fileLink");
+    latestFilename = result.filename;
+    fileLink.textContent = latestFilename;
+    fileLink.href = `${API_BASE}/download-xosc`;
     document.getElementById("fileMeta").textContent = `Generated just now · ${result.actors} actors · ${result.duration}s duration`;
     document.getElementById("xmlPreview").textContent = result.xosc_preview;
     document.getElementById("resultCard").scrollIntoView({ behavior: "smooth" });
@@ -95,7 +136,8 @@ async function generateScenario() {
 document.getElementById("generateBtn").addEventListener("click", generateScenario);
 
 document.getElementById("runBtn").addEventListener("click", async () => {
-  document.getElementById("logBox").textContent += "\n› Starting esmini...";
+  const filenameMessage = latestFilename ? `latest generated file ${latestFilename}` : "the latest generated file";
+  document.getElementById("logBox").textContent += `\n› Starting esmini with ${filenameMessage}...`;
 
   try {
     const res = await fetch(`${API_BASE}/run-esmini`, { method: "POST" });

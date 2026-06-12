@@ -32,3 +32,8 @@ build/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Runtime generated files
+02_Frontend_Code/narrative-xai-prototype/backend/generated/
+02_Frontend_Code/narrative-xai-prototype/backend/*.log
+*.log

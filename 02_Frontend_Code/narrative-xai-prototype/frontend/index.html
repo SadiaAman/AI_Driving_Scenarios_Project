@@ -29,9 +29,19 @@
         <label>Number of traffic vehicles
           <select id="trafficVehicles">
 	    <option value="" selected disabled>Select number of traffic vehicles</option>
+            <option value="0">None (0)</option>
             <option value="1">1</option>
             <option value="2">2</option>
             <option value="3">3</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid two">
+        <label>Time of day
+          <select id="timeOfDay">
+            <option value="" selected disabled>Select time of day</option>
+            <option value="Day">Day</option>
+            <option value="Night">Night</option>
           </select>
         </label>
       </div>
@@ -43,32 +53,28 @@
         <label>Weather conditions
           <select id="weather">
 	    <option value="" selected disabled>Select weather condition</option>
-            <option value="rain">rain</option>
             <option value="clear">clear</option>
+            <option value="rain">rain</option>
             <option value="fog">fog</option>
             <option value="snow">snow</option>
           </select>
           <small>Affects visibility and friction.</small>
         </label>
-        <label>NPC vehicle type
+        <label>NPC / actor type
           <select id="npcType">
-	    <option value="" selected disabled>Select NPC vehicle type</option>
-            <option value="fast car">a fast car</option>
-            <option value="truck">a truck</option>
-            <option value="pedestrian">a pedestrian</option>
-            <option value="cyclist">a cyclist</option>
+	    <option value="" selected disabled>Select NPC / actor type</option>
+            <option value="car">car</option>
+            <option value="truck">truck</option>
+            <option value="pedestrian">pedestrian</option>
+            <option value="cyclist">cyclist</option>
           </select>
           <small>The main other actor in the scene.</small>
         </label>
         <label>NPC behaviour
           <select id="npcBehavior">
-	    <option value="" selected disabled>Select NPC behaviour</option>
-            <option value="brakes suddenly">brakes suddenly</option>
-            <option value="changes lane suddenly">changes lane suddenly</option>
-            <option value="crosses the road">crosses the road</option>
-            <option value="cuts in front of ego">cuts in front of ego</option>
+	    <option value="" selected disabled>Select NPC / actor type first</option>
           </select>
-          <small>What does the NPC do?</small>
+          <small>Options depend on the selected NPC / actor type.</small>
         </label>
         <label>Ego vehicle response
           <select id="egoResponse">
@@ -118,10 +124,10 @@
     <section id="resultCard" class="card hidden">
       <div class="header-row">
         <div>
-          <h1 id="fileName">scenario_v1.xosc</h1>
+          <h1><a id="fileLink" href="#" target="_blank">scenario_v1.xosc</a></h1>
           <p id="fileMeta">Generated just now</p>
         </div>
-        <div class="badges"><span class="valid">Valid</span><span>Iteration 1</span></div>
+        <div class="badges"><span class="valid">Valid</span><span>Latest scenario</span></div>
       </div>
       <pre id="xmlPreview" class="code"></pre>
       <label>Refine with a follow-up prompt</label>
