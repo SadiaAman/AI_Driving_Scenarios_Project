@@ -141,7 +141,20 @@
         <button id="exportBtn">Export XOSC</button>
         <button id="runBtn">Run in esmini</button>
       </div>
-      <button class="secondary" onclick="window.scrollTo({top:0,behavior:'smooth'})">← Start new scenario</button>
+      <div id="comparePanel" class="panel hidden">
+        <h3>Compare scenarios</h3>
+        <div class="grid two">
+          <label>Version A
+            <select id="compareA"></select>
+          </label>
+          <label>Version B
+            <select id="compareB"></select>
+          </label>
+        </div>
+        <table id="compareTable" class="compare-table"></table>
+      </div>
+
+      <button id="newScenarioBtn" class="secondary">← Start new scenario</button>
     </section>
   </main>
   <script src="app.js"></script>

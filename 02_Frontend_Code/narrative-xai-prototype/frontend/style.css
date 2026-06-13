@@ -47,6 +47,13 @@ button:hover { border-color: var(--green); }
 .code { min-height: 280px; max-height: 420px; overflow-y: auto; overflow-x: auto; }
 .refine-row input { flex: 1; min-width: 220px; }
 .hidden { display:none; }
+#comparePanel { margin-top: 16px; }
+.compare-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+.compare-table th, .compare-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e3e0d8; }
+.compare-table th { color: #55776b; font-weight: 700; }
+.compare-table td:first-child { color: #6b6862; font-weight: 600; }
+.compare-table tr.diff td { background: #fff4d6; }
+.compare-table tr.diff td:first-child { color: #8a6d1f; }
 .secondary { margin-top: 16px; }
 @media (max-width: 760px) { .two { grid-template-columns: 1fr; } .header-row, .action-row { align-items:flex-start; flex-direction:column; } }
 #generateBtn {

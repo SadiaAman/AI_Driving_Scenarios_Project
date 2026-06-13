@@ -3,3 +3,9 @@ uvicorn
 pydantic
 # Used by scenario_builder.py for the gradual migration to programmatic XOSC.
 scenariogeneration==0.16.5
+# Optional: enables LLM-powered "Refine" parsing. The backend uses Gemini if a
+# GEMINI_API_KEY is set, else Claude if ANTHROPIC_API_KEY is set, else keyword rules.
+google-genai
+anthropic
+# Loads backend/.env into the environment (e.g. GEMINI_API_KEY).
+python-dotenv

@@ -92,7 +92,30 @@ document.getElementById("npcType").addEventListener("change", updateBehaviourOpt
 updateBehaviourOptions();
 updatePreview();
 
-async function generateScenario() {
+// Render a generate/refine result into the result card.
+function renderScenarioResult(result) {
+  document.getElementById("logBox").textContent = result.pipeline_log.join("\n");
+  document.getElementById("resultCard").classList.remove("hidden");
+  const fileLink = document.getElementById("fileLink");
+  latestFilename = result.filename;
+  fileLink.textContent = latestFilename;
+  fileLink.href = `${API_BASE}/download-xosc`;
+  document.getElementById("fileMeta").textContent = `Generated just now · ${result.actors} actors · ${result.duration}s duration${result.improved ? " · ★ improved behavior" : ""}`;
+  document.getElementById("xmlPreview").textContent = result.xosc_preview;
+  document.getElementById("resultCard").scrollIntoView({ behavior: "smooth" });
+}
+
+// Set the form dropdowns to match a resolved parameter set (used after refine).
+function syncFormToParams(params) {
+  ["egoSpeed", "trafficVehicles", "timeOfDay", "weather", "npcType", "egoResponse"].forEach(k => {
+    if (params[k] != null) document.getElementById(k).value = String(params[k]);
+  });
+  updateBehaviourOptions(); // rebuild behaviour list for the (possibly new) npcType
+  if (params.npcBehavior != null) document.getElementById("npcBehavior").value = params.npcBehavior;
+  updatePreview();
+}
+
+async function generateScenario(improve = false) {
   const data = getData();
 
   if (!isFormComplete(data)) {
@@ -102,14 +125,16 @@ async function generateScenario() {
 
   const prompt = makePrompt(data);
 
-  document.getElementById("logBox").textContent = `› Parsing prompt: "${prompt}"
+  document.getElementById("logBox").textContent = improve
+    ? `› Improving actor behavior for current scenario...`
+    : `› Parsing prompt: "${prompt}"
 › Sending structured prompt to backend...`;
 
   try {
     const res = await fetch(`${API_BASE}/generate-scenario`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...data, prompt })
+      body: JSON.stringify({ ...data, prompt, improve })
     });
 
     const result = await res.json();
@@ -118,22 +143,14 @@ async function generateScenario() {
       throw new Error(result.detail || "Backend error");
     }
 
-    document.getElementById("logBox").textContent = result.pipeline_log.join("\n");
-    document.getElementById("resultCard").classList.remove("hidden");
-    const fileLink = document.getElementById("fileLink");
-    latestFilename = result.filename;
-    fileLink.textContent = latestFilename;
-    fileLink.href = `${API_BASE}/download-xosc`;
-    document.getElementById("fileMeta").textContent = `Generated just now · ${result.actors} actors · ${result.duration}s duration`;
-    document.getElementById("xmlPreview").textContent = result.xosc_preview;
-    document.getElementById("resultCard").scrollIntoView({ behavior: "smooth" });
+    renderScenarioResult(result);
 
   } catch (err) {
     document.getElementById("logBox").textContent += `\n✗ Error: ${err.message}\nMake sure backend is running: uvicorn main:app --reload`;
   }
 }
 
-document.getElementById("generateBtn").addEventListener("click", generateScenario);
+document.getElementById("generateBtn").addEventListener("click", () => generateScenario(false));
 
 document.getElementById("runBtn").addEventListener("click", async () => {
   const filenameMessage = latestFilename ? `latest generated file ${latestFilename}` : "the latest generated file";
@@ -152,20 +169,122 @@ document.getElementById("exportBtn").addEventListener("click", () => {
   window.open(`${API_BASE}/download-xosc`, "_blank");
 });
 
-document.getElementById("refineBtn").addEventListener("click", () => {
+document.getElementById("refineBtn").addEventListener("click", async () => {
   const text = document.getElementById("refineText").value.trim();
-
   if (!text) {
     return alert("Write a small refinement instruction first.");
   }
+  if (!isFormComplete()) {
+    return alert("Generate a scenario first, then refine it.");
+  }
 
-  document.getElementById("logBox").textContent += `\n› Refinement note saved: ${text}\n› In the next version, this can be sent to Claude/OpenAI for LLM refinement.`;
+  const data = getData();
+  const prompt = makePrompt(data);
+  document.getElementById("logBox").textContent = `› Applying refinement: "${text}"...`;
+
+  try {
+    const res = await fetch(`${API_BASE}/refine-scenario`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...data, prompt, refineText: text })
+    });
+    const result = await res.json();
+    if (!res.ok) {
+      throw new Error(result.detail || "Backend error");
+    }
+
+    syncFormToParams(result.params);   // reflect the new parameters in the form
+    renderScenarioResult(result);      // show the new file + change log
+    document.getElementById("refineText").value = "";
+  } catch (err) {
+    document.getElementById("logBox").textContent += `\n✗ Refine failed: ${err.message}\nMake sure backend is running: uvicorn main:app --reload`;
+  }
 });
 
 document.getElementById("improveBtn").addEventListener("click", () => {
-  alert("Prototype idea: this button can ask the LLM to make actor behavior more realistic.");
+  if (!isFormComplete()) {
+    alert("Generate a scenario first, then Improve actor behavior.");
+    return;
+  }
+  generateScenario(true);
 });
 
-document.getElementById("compareBtn").addEventListener("click", () => {
-  alert("Prototype idea: save scenario_v1, scenario_v2 and compare changed parameters.");
+// ---- Compare versions ----
+let compareScenarios = [];
+const COMPARE_FIELDS = [
+  ["egoSpeed", "Ego speed (km/h)"],
+  ["trafficVehicles", "Traffic vehicles"],
+  ["timeOfDay", "Time of day"],
+  ["weather", "Weather"],
+  ["npcType", "NPC / actor type"],
+  ["npcBehavior", "NPC behaviour"],
+  ["egoResponse", "Ego response"],
+  ["improved", "Improved behavior"]
+];
+
+function fillCompareSelect(select, selectedIndex) {
+  select.innerHTML = compareScenarios
+    .map((s, i) => `<option value="${i}">${s.filename}</option>`)
+    .join("");
+  select.selectedIndex = selectedIndex;
+}
+
+function renderCompare() {
+  const a = compareScenarios[document.getElementById("compareA").value];
+  const b = compareScenarios[document.getElementById("compareB").value];
+  if (!a || !b) return;
+
+  const rows = COMPARE_FIELDS.map(([key, label]) => {
+    const va = a[key] == null ? "—" : a[key];
+    const vb = b[key] == null ? "—" : b[key];
+    const diff = String(va) !== String(vb) ? "diff" : "";
+    return `<tr class="${diff}"><td>${label}</td><td>${va}</td><td>${vb}</td></tr>`;
+  }).join("");
+
+  document.getElementById("compareTable").innerHTML =
+    `<tr><th>Parameter</th><th>Version A</th><th>Version B</th></tr>${rows}`;
+}
+
+document.getElementById("compareBtn").addEventListener("click", async () => {
+  try {
+    const res = await fetch(`${API_BASE}/list-scenarios`);
+    const data = await res.json();
+    compareScenarios = data.scenarios || [];
+
+    if (compareScenarios.length < 2) {
+      alert("Generate at least two scenarios before comparing.");
+      return;
+    }
+
+    fillCompareSelect(document.getElementById("compareA"), 0);
+    fillCompareSelect(document.getElementById("compareB"), 1);
+    const panel = document.getElementById("comparePanel");
+    panel.classList.remove("hidden");
+    renderCompare();
+    panel.scrollIntoView({ behavior: "smooth" });
+  } catch (err) {
+    alert("Could not load scenarios to compare: " + err.message);
+  }
 });
+
+document.getElementById("compareA").addEventListener("change", renderCompare);
+document.getElementById("compareB").addEventListener("change", renderCompare);
+
+function startNewScenario() {
+  // Reset every dropdown back to its placeholder.
+  fields.forEach(id => { document.getElementById(id).value = ""; });
+  // Rebuild the behaviour list (clears it back to "select actor type first")
+  // and refresh the prompt preview, checklist and progress bar.
+  updateBehaviourOptions();
+
+  // Clear the result card, compare panel and the log/refinement inputs.
+  document.getElementById("resultCard").classList.add("hidden");
+  document.getElementById("comparePanel").classList.add("hidden");
+  document.getElementById("logBox").textContent = "Waiting for scenario generation...";
+  document.getElementById("refineText").value = "";
+  latestFilename = null;
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+document.getElementById("newScenarioBtn").addEventListener("click", startNewScenario);

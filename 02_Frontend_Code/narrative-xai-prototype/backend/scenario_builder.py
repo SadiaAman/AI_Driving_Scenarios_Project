@@ -61,6 +61,51 @@ def environment_action_xml(*args, **kwargs) -> str:
     return ET.tostring(element, encoding="unicode")
 
 
+def build_entities_xml(
+    npc_catalog: str | None,
+    pedestrian_model: str,
+    traffic_models: list,
+    num_traffic_vehicles: int,
+) -> str:
+    """
+    Second migrated block: the <Entities> list, built with scenariogeneration.
+
+    - Ego: a VehicleCatalog reference to the $HostVehicle parameter.
+    - NPC: a VehicleCatalog reference when npc_catalog is given (car / truck /
+      cyclist), otherwise an inline Pedestrian (walkman) with scaleMode set, to
+      match what esmini expects for pedestrian model scaling.
+    - TrafficVehicle_n: VehicleCatalog references cycling through traffic_models.
+    """
+    entities = xosc.Entities()
+    entities.add_scenario_object(
+        "Ego", xosc.CatalogReference("VehicleCatalog", "$HostVehicle")
+    )
+
+    if npc_catalog:
+        entities.add_scenario_object(
+            "NPC", xosc.CatalogReference("VehicleCatalog", npc_catalog)
+        )
+    else:
+        bounding_box = xosc.BoundingBox(0.5, 0.6, 1.8, 0.06, 0.0, 0.923)
+        pedestrian = xosc.Pedestrian(
+            "NPC", 80, xosc.PedestrianCategory.pedestrian, bounding_box,
+            model=pedestrian_model,
+        )
+        pedestrian.add_property("scaleMode", "BBToModel")
+        entities.add_scenario_object("NPC", pedestrian)
+
+    for index in range(num_traffic_vehicles):
+        model = traffic_models[index % len(traffic_models)]
+        entities.add_scenario_object(
+            f"TrafficVehicle_{index + 1}",
+            xosc.CatalogReference("VehicleCatalog", model),
+        )
+
+    element = entities.get_element()
+    ET.indent(element, space="   ")
+    return ET.tostring(element, encoding="unicode")
+
+
 if __name__ == "__main__":
     # Demo: print the EnvironmentAction for a clear day, to eyeball against the
     # manual XML in main.build_xosc_preview().

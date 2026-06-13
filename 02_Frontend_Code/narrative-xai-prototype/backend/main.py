@@ -13,13 +13,30 @@ from pydantic import BaseModel
 # string. The import is optional — if the library is unavailable we transparently
 # fall back to the manual builder, so the generator never breaks.
 try:
-    from scenario_builder import environment_action_xml as _sg_environment_action_xml
+    from scenario_builder import (
+        environment_action_xml as _sg_environment_action_xml,
+        build_entities_xml as _sg_build_entities_xml,
+    )
     _SCENARIOGENERATION_AVAILABLE = True
 except Exception:
     _SCENARIOGENERATION_AVAILABLE = False
 
+# Varied colours/models for background traffic (existing VehicleCatalog entries),
+# distinguishable from the white Ego and red NPC. Shared by the manual loop and
+# the scenariogeneration entities builder so both stay in sync.
+TRAFFIC_MODELS = ["car_blue", "car_yellow", "van_red"]
+
 
 BASE_DIR = Path(__file__).resolve().parent
+
+# Load backend/.env into the environment (e.g. ANTHROPIC_API_KEY) if python-dotenv
+# is installed. Optional — without it, real OS environment variables still work.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except Exception:
+    pass
+
 GENERATED_DIR = BASE_DIR / "generated"
 GENERATED_DIR.mkdir(exist_ok=True)
 LATEST_XOSC_PATH = None
@@ -52,6 +69,15 @@ class ScenarioRequest(BaseModel):
     npcBehavior: str
     egoResponse: str
     prompt: str
+    # When true, "Improve actor behavior" intensifies the NPC and ego maneuvers
+    # (harder/earlier braking, faster cut-in/lane-change, more sudden crossing).
+    # Defaults to false so normal generation is unchanged.
+    improve: bool = False
+
+
+class RefineRequest(ScenarioRequest):
+    # A free-text follow-up instruction, e.g. "make it rain and use a truck".
+    refineText: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +189,36 @@ def build_environment_action(
     return _manual_environment_action(*args)
 
 
+def _manual_entities_block(npc_entity: str, traffic_vehicle_entities: str) -> str:
+    """Manual-XML <Entities> block (fallback when scenariogeneration is absent)."""
+    return f'''<Entities>
+      <ScenarioObject name="Ego">
+         <CatalogReference catalogName="VehicleCatalog" entryName="$HostVehicle"/>
+      </ScenarioObject>
+{npc_entity}{traffic_vehicle_entities}
+   </Entities>'''
+
+
+def build_entities_block(
+    npc: dict, pedestrian_model: str, num_traffic_vehicles: int,
+    npc_entity: str, traffic_vehicle_entities: str,
+) -> str:
+    """
+    Migration slice 2: build the <Entities> list with scenariogeneration when
+    available, otherwise fall back to the manual XML pieces. Both are equivalent
+    and esmini-compatible.
+    """
+    if _SCENARIOGENERATION_AVAILABLE:
+        try:
+            return _sg_build_entities_xml(
+                npc.get("catalog"), pedestrian_model, TRAFFIC_MODELS,
+                num_traffic_vehicles,
+            )
+        except Exception:
+            return _manual_entities_block(npc_entity, traffic_vehicle_entities)
+    return _manual_entities_block(npc_entity, traffic_vehicle_entities)
+
+
 def build_xosc_preview(data: ScenarioRequest) -> str:
     """
     Generate an esmini-compatible OpenSCENARIO file on the fabriksgatan road.
@@ -218,9 +274,7 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
         # (oncoming); lane 2 is a border/shoulder. Keeping traffic in lane -1
         # ensures it never blocks the ego's lane or the lane it steers into.
         traffic_positions = [(-1, 20), (-1, 35), (-1, 50)]
-        # Varied colours/models so the background traffic is distinguishable from
-        # the white Ego and the red NPC. All are existing VehicleCatalog entries.
-        traffic_models = ["car_blue", "car_yellow", "van_red"]
+        traffic_models = TRAFFIC_MODELS
         # Gentle motion so the traffic visibly drives (oncoming direction on
         # lane -1) without catching up to the Ego or NPC in lane 1.
         traffic_speed_ms = 4.0
@@ -255,6 +309,12 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
                </PrivateAction>
             </Private>'''
 
+    # Migration slice 2: <Entities> now comes from scenariogeneration (manual fallback).
+    entities_block = build_entities_block(
+        npc, pedestrian_model, num_traffic_vehicles,
+        npc_entity, traffic_vehicle_entities,
+    )
+
     # -- Phase 3: headlights at night for vehicle entities (skips pedestrian/cyclist). --
     headlight_entities = ["Ego"]
     if npc["kind"] == "vehicle":
@@ -278,6 +338,7 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
       <ParameterDeclaration name="NPCType" parameterType="string" value="{data.npcType}"/>
       <ParameterDeclaration name="NPCBehaviour" parameterType="string" value="{data.npcBehavior}"/>
       <ParameterDeclaration name="EgoResponse" parameterType="string" value="{data.egoResponse}"/>
+      <ParameterDeclaration name="Improved" parameterType="boolean" value="{str(data.improve).lower()}"/>
    </ParameterDeclarations>
 
    <CatalogLocations>
@@ -294,13 +355,7 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
       <SceneGraphFile filepath="{scene_graph_file}"/>
    </RoadNetwork>
 
-   <Entities>
-      <ScenarioObject name="Ego">
-         <CatalogReference catalogName="VehicleCatalog" entryName="$HostVehicle"/>
-      </ScenarioObject>
-
-{npc_entity}{traffic_vehicle_entities}
-   </Entities>
+   {entities_block}
 
    <Storyboard>
       <Init>
@@ -417,7 +472,11 @@ def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float, pedestrian
 
     Returns (npc_entity, npc_init, npc_maneuver_group) XML fragments. The entity
     is always named "NPC" so triggers elsewhere can reference it regardless of type.
+
+    When data.improve is set, the maneuver is intensified (more sudden crossing,
+    harder/faster vehicle maneuvers) to give a sharper "improved behaviour" variant.
     """
+    improve = data.improve
     if npc["kind"] == "crosser":
         # --- Entity: pedestrian uses an inline Pedestrian, cyclist a catalog vehicle ---
         if npc["catalog"]:
@@ -455,6 +514,11 @@ def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float, pedestrian
             </Private>'''
 
         # --- Maneuver: walk/ride across the road on the proven trajectory ---
+        # The crossing keeps its normal pace even in improved mode: for a
+        # pedestrian/cyclist safety scenario, "improve" sharpens the EGO reaction
+        # (reliable, early brake), not the vulnerable road user's behaviour.
+        cross_speed = npc["speed"]
+        cross_accel = "2"
         start_trigger = _ego_traveled_trigger("npc_cross_condition", 5)
         npc_maneuver_group = f'''
             <ManeuverGroup maximumExecutionCount="1" name="npc_group">
@@ -467,9 +531,9 @@ def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float, pedestrian
                         <PrivateAction>
                            <LongitudinalAction>
                               <SpeedAction>
-                                 <SpeedActionDynamics dynamicsShape="linear" value="2" dynamicsDimension="rate"/>
+                                 <SpeedActionDynamics dynamicsShape="linear" value="{cross_accel}" dynamicsDimension="rate"/>
                                  <SpeedActionTarget>
-                                    <AbsoluteTargetSpeed value="{npc['speed']}"/>
+                                    <AbsoluteTargetSpeed value="{cross_speed}"/>
                                  </SpeedActionTarget>
                               </SpeedAction>
                            </LongitudinalAction>
@@ -534,13 +598,14 @@ def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float, pedestrian
                </PrivateAction>
             </Private>'''
 
-    # --- Behaviour: pick the maneuver action ---
+    # --- Behaviour: pick the maneuver action (improved = faster / harder) ---
     if data.npcBehavior == "changes lane suddenly":
         # Veer out of ego's lane (relative +1).
-        action_body = '''<PrivateAction>
+        lane_change_time = "1.2" if improve else "2"
+        action_body = f'''<PrivateAction>
                            <LateralAction>
                               <LaneChangeAction>
-                                 <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="2" dynamicsDimension="time"/>
+                                 <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="{lane_change_time}" dynamicsDimension="time"/>
                                  <LaneChangeTarget>
                                     <RelativeTargetLane entityRef="NPC" value="1"/>
                                  </LaneChangeTarget>
@@ -549,10 +614,11 @@ def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float, pedestrian
                         </PrivateAction>'''
     elif data.npcBehavior == "cuts in front of ego":
         # Started in lane 2, cut into ego's lane (relative -1).
-        action_body = '''<PrivateAction>
+        cut_in_time = "1.0" if improve else "1.5"
+        action_body = f'''<PrivateAction>
                            <LateralAction>
                               <LaneChangeAction>
-                                 <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="1.5" dynamicsDimension="time"/>
+                                 <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="{cut_in_time}" dynamicsDimension="time"/>
                                  <LaneChangeTarget>
                                     <RelativeTargetLane entityRef="NPC" value="-1"/>
                                  </LaneChangeTarget>
@@ -562,10 +628,11 @@ def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float, pedestrian
     else:
         # "brakes suddenly" (and a non-applicable "crosses the road" for vehicles):
         # the lead vehicle brakes hard to a stop.
-        action_body = '''<PrivateAction>
+        brake_rate = "-9" if improve else "-6"
+        action_body = f'''<PrivateAction>
                            <LongitudinalAction>
                               <SpeedAction>
-                                 <SpeedActionDynamics dynamicsShape="linear" value="-6" dynamicsDimension="rate"/>
+                                 <SpeedActionDynamics dynamicsShape="linear" value="{brake_rate}" dynamicsDimension="rate"/>
                                  <SpeedActionTarget>
                                     <AbsoluteTargetSpeed value="0"/>
                                  </SpeedActionTarget>
@@ -573,7 +640,7 @@ def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float, pedestrian
                            </LongitudinalAction>
                         </PrivateAction>'''
 
-    start_trigger = _ego_traveled_trigger("npc_behaviour_condition", 8)
+    start_trigger = _ego_traveled_trigger("npc_behaviour_condition", 6 if improve else 8)
     npc_maneuver_group = f'''
             <ManeuverGroup maximumExecutionCount="1" name="npc_group">
                <Actors selectTriggeringEntities="false">
@@ -605,14 +672,24 @@ def build_ego_response(data: ScenarioRequest, host_speed_ms: float) -> str:
     stops in time at higher speeds, not just at 30 km/h.
     """
     # Stopping distance at the hardest deceleration we use (~8 m/s^2) plus an 8 m
-    # margin, so the ego begins braking with room to stop before the NPC.
-    trigger_distance = round(host_speed_ms ** 2 / 16 + 8, 1)
+    # margin, so the ego begins braking with room to stop before the NPC. Improved:
+    # react 30% earlier (larger trigger distance) for a more decisive reaction.
+    #
+    # Cap at 40 m: the ego<->NPC starting gap on this road is ~48 m for a crossing
+    # pedestrian, so an uncapped distance (e.g. ~50 m at 80 km/h improved) would be
+    # already satisfied at t=0 and the brake would never trigger. 40 m keeps the
+    # condition starting false so it fires reliably and the ego stops in time.
+    improve = data.improve
+    trigger_distance = min(
+        round((host_speed_ms ** 2 / 16 + 8) * (1.3 if improve else 1.0), 1), 40.0
+    )
     if data.egoResponse == "brakes immediately":
-        actions = '''<Action name="ego_response_action">
+        brake_rate = "-10" if improve else "-8"
+        actions = f'''<Action name="ego_response_action">
                         <PrivateAction>
                            <LongitudinalAction>
                               <SpeedAction>
-                                 <SpeedActionDynamics dynamicsShape="linear" value="-8" dynamicsDimension="rate"/>
+                                 <SpeedActionDynamics dynamicsShape="linear" value="{brake_rate}" dynamicsDimension="rate"/>
                                  <SpeedActionTarget>
                                     <AbsoluteTargetSpeed value="0"/>
                                  </SpeedActionTarget>
@@ -621,13 +698,16 @@ def build_ego_response(data: ScenarioRequest, host_speed_ms: float) -> str:
                         </PrivateAction>
                      </Action>'''
     elif data.egoResponse == "steers to avoid":
-        # Lane change away from the NPC plus a mild speed reduction.
-        target_speed = round(host_speed_ms * 0.6, 2)
+        # Lane change away from the NPC plus a speed reduction. Improved: quicker
+        # swerve and a stronger slow-down.
+        steer_time = "1.2" if improve else "2"
+        slow_rate = "-5" if improve else "-3"
+        target_speed = round(host_speed_ms * (0.4 if improve else 0.6), 2)
         actions = f'''<Action name="ego_response_steer">
                         <PrivateAction>
                            <LateralAction>
                               <LaneChangeAction>
-                                 <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="2" dynamicsDimension="time"/>
+                                 <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="{steer_time}" dynamicsDimension="time"/>
                                  <LaneChangeTarget>
                                     <RelativeTargetLane entityRef="Ego" value="1"/>
                                  </LaneChangeTarget>
@@ -639,7 +719,7 @@ def build_ego_response(data: ScenarioRequest, host_speed_ms: float) -> str:
                         <PrivateAction>
                            <LongitudinalAction>
                               <SpeedAction>
-                                 <SpeedActionDynamics dynamicsShape="linear" value="-3" dynamicsDimension="rate"/>
+                                 <SpeedActionDynamics dynamicsShape="linear" value="{slow_rate}" dynamicsDimension="rate"/>
                                  <SpeedActionTarget>
                                     <AbsoluteTargetSpeed value="{target_speed}"/>
                                  </SpeedActionTarget>
@@ -648,12 +728,13 @@ def build_ego_response(data: ScenarioRequest, host_speed_ms: float) -> str:
                         </PrivateAction>
                      </Action>'''
     else:
-        # "slows down" and "keeps lane and reduces speed": gentle deceleration to
-        # a fraction of the original speed (no lane change).
+        # "slows down" and "keeps lane and reduces speed": deceleration to a
+        # fraction of the original speed (no lane change). Improved: brake harder
+        # and to a lower speed.
         if data.egoResponse == "slows down":
-            rate, factor = "-3", 0.4
+            rate, factor = ("-5", 0.3) if improve else ("-3", 0.4)
         else:  # keeps lane and reduces speed
-            rate, factor = "-4", 0.5
+            rate, factor = ("-6", 0.35) if improve else ("-4", 0.5)
         target_speed = round(host_speed_ms * factor, 2)
         actions = f'''<Action name="ego_response_action">
                         <PrivateAction>
@@ -678,7 +759,7 @@ def build_ego_response(data: ScenarioRequest, host_speed_ms: float) -> str:
                      {actions}
                      <StartTrigger>
                         <ConditionGroup>
-                           <Condition name="ego_response_condition" delay="0" conditionEdge="rising">
+                           <Condition name="ego_response_condition" delay="0" conditionEdge="none">
                               <ByEntityCondition>
                                  <TriggeringEntities triggeringEntitiesRule="any">
                                     <EntityRef entityRef="Ego"/>
@@ -792,20 +873,197 @@ def generate_scenario(data: ScenarioRequest):
     num_traffic_vehicles = min(max(data.trafficVehicles, 0), 3)
     actual_actor_count = 2 + num_traffic_vehicles  # Ego + pedestrian + traffic vehicles
 
+    pipeline_log = [
+        f"› Parsing prompt: \"{data.prompt[:80]}...\"",
+        "› Sending structured prompt to generator...",
+        "› trafficVehicles received; vehicle generation is currently prototype-only and may not produce full XOSC traffic behavior.",
+        f"✓ XOSC generated — {actual_actor_count} actors, 14.2 s duration",
+    ]
+    if data.improve:
+        pipeline_log.append(
+            "★ Improved actor behavior — sharper NPC maneuver, harder/earlier ego reaction."
+        )
+    pipeline_log += [
+        "› Running validation step...",
+        "✓ Validation passed — no issues",
+        "✓ Scenario ready for export",
+    ]
+
     return {
         "filename": filename,
         "actors": actual_actor_count,
         "duration": 14.2,
+        "improved": data.improve,
         "xosc_preview": xosc,
-        "pipeline_log": [
-            f"› Parsing prompt: \"{data.prompt[:80]}...\"",
-            "› Sending structured prompt to generator...",
-            "› trafficVehicles received; vehicle generation is currently prototype-only and may not produce full XOSC traffic behavior.",
-            f"✓ XOSC generated — {actual_actor_count} actors, 14.2 s duration",
-            "› Running validation step...",
-            "✓ Validation passed — no issues",
-            "✓ Scenario ready for export",
-        ],
+        "pipeline_log": pipeline_log,
+    }
+
+
+SPEED_PRESETS = [30, 50, 80, 100]
+
+
+def parse_refinement(text: str, current: ScenarioRequest) -> dict:
+    """
+    Map a free-text follow-up instruction to parameter overrides (keyword-based,
+    no LLM). Only recognised phrases produce overrides; everything else is left
+    unchanged. Returns a dict of the fields to override.
+    """
+    t = text.lower()
+    o: dict = {}
+
+    # Weather
+    if "clear" in t or "sunny" in t:
+        o["weather"] = "clear"
+    if "rain" in t:
+        o["weather"] = "rain"
+    if "fog" in t:
+        o["weather"] = "fog"
+    if "snow" in t:
+        o["weather"] = "snow"
+
+    # Time of day
+    if "night" in t:
+        o["timeOfDay"] = "Night"
+    elif "day" in t:
+        o["timeOfDay"] = "Day"
+
+    # NPC / actor type
+    if "truck" in t:
+        o["npcType"] = "truck"
+    if "cyclist" in t or "bicycle" in t or "bike" in t:
+        o["npcType"] = "cyclist"
+    if "pedestrian" in t or "person" in t or "walker" in t or "walking" in t:
+        o["npcType"] = "pedestrian"
+    if re.search(r"\bcar\b", t):
+        o["npcType"] = "car"
+
+    # NPC behaviour
+    if "cut in" in t or "cuts in" in t or "cut-in" in t or "cutin" in t:
+        o["npcBehavior"] = "cuts in front of ego"
+    elif "lane" in t and ("change" in t or "changes" in t or "switch" in t):
+        o["npcBehavior"] = "changes lane suddenly"
+    elif "cross" in t:
+        o["npcBehavior"] = "crosses the road"
+    elif "sudden brake" in t or "brakes suddenly" in t or "brake suddenly" in t:
+        o["npcBehavior"] = "brakes suddenly"
+
+    # Ego response (ego-specific phrases to avoid clashing with NPC behaviour)
+    if "steer" in t or "swerve" in t or "avoid" in t:
+        o["egoResponse"] = "steers to avoid"
+    elif "keep lane" in t or "keeps lane" in t or "stay in lane" in t:
+        o["egoResponse"] = "keeps lane and reduces speed"
+    elif "slow down" in t or "slows down" in t or "reduce speed" in t or "reduces speed" in t:
+        o["egoResponse"] = "slows down"
+    elif "stop" in t or "emergency" in t or "hard brake" in t or "brake hard" in t or "brakes immediately" in t:
+        o["egoResponse"] = "brakes immediately"
+
+    # Ego speed: explicit number first, then relative faster/slower.
+    speed_match = re.search(r"(\d{2,3})\s*km", t)
+    if speed_match:
+        o["egoSpeed"] = min(SPEED_PRESETS, key=lambda p: abs(p - int(speed_match.group(1))))
+    elif "faster" in t or "speed up" in t:
+        idx = min(range(len(SPEED_PRESETS)), key=lambda i: abs(SPEED_PRESETS[i] - current.egoSpeed))
+        o["egoSpeed"] = SPEED_PRESETS[min(idx + 1, len(SPEED_PRESETS) - 1)]
+    elif "slower" in t:
+        idx = min(range(len(SPEED_PRESETS)), key=lambda i: abs(SPEED_PRESETS[i] - current.egoSpeed))
+        o["egoSpeed"] = SPEED_PRESETS[max(idx - 1, 0)]
+
+    # Traffic vehicles
+    if "no traffic" in t or "without traffic" in t or "remove traffic" in t:
+        o["trafficVehicles"] = 0
+    elif "more traffic" in t or "add traffic" in t:
+        o["trafficVehicles"] = min(current.trafficVehicles + 1, 3)
+    elif "less traffic" in t or "fewer traffic" in t:
+        o["trafficVehicles"] = max(current.trafficVehicles - 1, 0)
+
+    # Intensify
+    if any(w in t for w in ["aggressive", "sharper", "more realistic", "intensify", "improve"]):
+        o["improve"] = True
+
+    return o
+
+
+@app.post("/refine-scenario")
+def refine_scenario(data: RefineRequest):
+    """
+    Apply a free-text refinement to the current parameters, keep the NPC type and
+    behaviour consistent, regenerate a new versioned XOSC, and report what changed.
+    """
+    fields = [
+        ("egoSpeed", "Ego speed"),
+        ("trafficVehicles", "Traffic vehicles"),
+        ("timeOfDay", "Time of day"),
+        ("weather", "Weather"),
+        ("npcType", "NPC / actor type"),
+        ("npcBehavior", "NPC behaviour"),
+        ("egoResponse", "Ego response"),
+        ("improve", "Improved"),
+    ]
+    original = {f: getattr(data, f) for f, _ in fields}
+
+    # Prefer the LLM parser (Anthropic Claude) when available; otherwise use the
+    # keyword parser. Either way the result is the same shape, and the LLM path
+    # can never break refinement (it returns None on any issue).
+    overrides = None
+    provider_label = "keyword rules"
+    try:
+        from llm_refine import llm_parse_refinement, LLM_AVAILABLE, PROVIDER_LABEL
+        if LLM_AVAILABLE:
+            overrides = llm_parse_refinement(data.refineText, data)
+            if overrides is not None:
+                provider_label = PROVIDER_LABEL
+    except Exception:
+        overrides = None
+    if overrides is None:
+        overrides = parse_refinement(data.refineText, data)
+
+    merged = {**original, **overrides}
+
+    # Keep behaviour valid for the (possibly changed) NPC type, mirroring the UI.
+    notes = []
+    if merged["npcType"] in ("pedestrian", "cyclist"):
+        if merged["npcBehavior"] != "crosses the road":
+            merged["npcBehavior"] = "crosses the road"
+            notes.append("NPC behaviour set to 'crosses the road' to match the actor type.")
+    else:  # car / truck
+        if merged["npcBehavior"] not in ("brakes suddenly", "changes lane suddenly", "cuts in front of ego"):
+            merged["npcBehavior"] = "brakes suddenly"
+            notes.append("NPC behaviour set to 'brakes suddenly' to match the actor type.")
+
+    changes = [f"{label}: {original[f]} → {merged[f]}" for f, label in fields if str(original[f]) != str(merged[f])]
+
+    refined = data.model_copy(update=merged)
+    xosc = build_xosc_preview(refined)
+    filename = build_scenario_filename(refined)
+    xosc_path = GENERATED_DIR / filename
+    xosc_path.write_text(xosc, encoding="utf-8")
+
+    global LATEST_XOSC_PATH
+    LATEST_XOSC_PATH = xosc_path
+
+    num_traffic_vehicles = min(max(refined.trafficVehicles, 0), 3)
+    actual_actor_count = 2 + num_traffic_vehicles
+
+    pipeline_log = [
+        f'› Refinement: "{data.refineText[:80]}"',
+        f"  (interpreted by {provider_label})",
+    ]
+    if changes:
+        pipeline_log += [f"  • {c}" for c in changes]
+    else:
+        pipeline_log.append("  • No known parameters matched — nothing changed.")
+    pipeline_log += [f"  ⓘ {n}" for n in notes]
+    pipeline_log.append(f"✓ Refined XOSC generated — {actual_actor_count} actors")
+
+    return {
+        "filename": filename,
+        "actors": actual_actor_count,
+        "duration": 14.2,
+        "improved": refined.improve,
+        "xosc_preview": xosc,
+        "pipeline_log": pipeline_log,
+        "changes": changes,
+        "params": {f: merged[f] for f, _ in fields},
     }
 
 
@@ -840,6 +1098,48 @@ def download_xosc():
         raise HTTPException(status_code=404, detail="Generate a scenario first.")
 
     return FileResponse(str(xosc_path), filename=xosc_path.name)
+
+
+@app.get("/list-scenarios")
+def list_scenarios():
+    """
+    List generated scenarios with their parameters (newest first) so the frontend
+    can compare two versions. Read-only — does not generate, run, or modify files.
+    egoSpeed/trafficVehicles/weather come from the filename; the descriptive
+    parameters come from the XOSC ParameterDeclarations.
+    """
+    filename_pattern = re.compile(r"scenario_\d{3}_(\d+)kmh_(\d+)traffic_(.+)\.xosc")
+
+    def param(text: str, name: str):
+        match = re.search(rf'name="{name}"[^>]*value="([^"]*)"', text)
+        return match.group(1) if match else None
+
+    scenarios = []
+    for path in sorted(GENERATED_DIR.glob("scenario_*.xosc"),
+                       key=lambda p: p.stat().st_mtime, reverse=True):
+        match = filename_pattern.match(path.name)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            text = ""
+        # timeOfDay isn't stored as a parameter; derive it from the dateTime hour.
+        time_of_day = None
+        tod_match = re.search(r'dateTime="[^"]*T(\d{2}):', text)
+        if tod_match:
+            hour = int(tod_match.group(1))
+            time_of_day = "Day" if 6 <= hour < 18 else "Night"
+        scenarios.append({
+            "filename": path.name,
+            "egoSpeed": int(match.group(1)) if match else None,
+            "trafficVehicles": int(match.group(2)) if match else None,
+            "timeOfDay": time_of_day,
+            "weather": match.group(3) if match else param(text, "WeatherCondition"),
+            "npcType": param(text, "NPCType"),
+            "npcBehavior": param(text, "NPCBehaviour"),
+            "egoResponse": param(text, "EgoResponse"),
+            "improved": param(text, "Improved") or "false",
+        })
+    return {"scenarios": scenarios}
 
 
 @app.get("/")
