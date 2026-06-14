@@ -106,6 +106,38 @@ def build_entities_xml(
     return ET.tostring(element, encoding="unicode")
 
 
+def build_ego_init_xml(host_speed_ms: float) -> str:
+    """
+    Third migrated block (Init slice, Ego only): the Ego's Init private actions —
+    assign the fabriksgatan route, teleport onto it (RoutePosition gives the
+    correct heading), and set the start speed. Returns the <Private entityRef="Ego">
+    element as a string. NPC and traffic init stay manual for now.
+    """
+    route = xosc.CatalogReference("RoutesAtFabriksgatan", "HostStraightRoute")
+    init = xosc.Init()
+    init.add_init_action(
+        "Ego", xosc.AssignRouteAction(
+            xosc.CatalogReference("RoutesAtFabriksgatan", "HostStraightRoute")
+        )
+    )
+    init.add_init_action(
+        "Ego", xosc.TeleportAction(
+            xosc.RoutePositionInLaneCoordinates(route, s=0, laneid=1, offset=0.0)
+        )
+    )
+    init.add_init_action(
+        "Ego", xosc.AbsoluteSpeedAction(
+            host_speed_ms,
+            xosc.TransitionDynamics(
+                xosc.DynamicsShapes.step, xosc.DynamicsDimension.time, 0.0
+            ),
+        )
+    )
+    private = init.get_element().find("Actions/Private")
+    ET.indent(private, space="   ")
+    return ET.tostring(private, encoding="unicode")
+
+
 if __name__ == "__main__":
     # Demo: print the EnvironmentAction for a clear day, to eyeball against the
     # manual XML in main.build_xosc_preview().

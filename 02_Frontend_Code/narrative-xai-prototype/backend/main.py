@@ -16,6 +16,7 @@ try:
     from scenario_builder import (
         environment_action_xml as _sg_environment_action_xml,
         build_entities_xml as _sg_build_entities_xml,
+        build_ego_init_xml as _sg_build_ego_init_xml,
     )
     _SCENARIOGENERATION_AVAILABLE = True
 except Exception:
@@ -219,6 +220,57 @@ def build_entities_block(
     return _manual_entities_block(npc_entity, traffic_vehicle_entities)
 
 
+def _manual_ego_init(host_speed_ms: float) -> str:
+    """Manual-XML Ego Init private block (fallback). Uses the $HostSpeed param."""
+    return '''<Private entityRef="Ego">
+               <PrivateAction>
+                  <RoutingAction>
+                     <AssignRouteAction>
+                        <CatalogReference catalogName="RoutesAtFabriksgatan" entryName="HostStraightRoute"/>
+                     </AssignRouteAction>
+                  </RoutingAction>
+               </PrivateAction>
+               <PrivateAction>
+                  <TeleportAction>
+                     <Position>
+                        <RoutePosition>
+                           <RouteRef>
+                              <CatalogReference catalogName="RoutesAtFabriksgatan" entryName="HostStraightRoute"/>
+                           </RouteRef>
+                           <InRoutePosition>
+                              <FromLaneCoordinates pathS="0" laneId="1"/>
+                           </InRoutePosition>
+                        </RoutePosition>
+                     </Position>
+                  </TeleportAction>
+               </PrivateAction>
+               <PrivateAction>
+                  <LongitudinalAction>
+                     <SpeedAction>
+                        <SpeedActionDynamics dynamicsShape="step" value="0.0" dynamicsDimension="time"/>
+                        <SpeedActionTarget>
+                           <AbsoluteTargetSpeed value="$HostSpeed"/>
+                        </SpeedActionTarget>
+                     </SpeedAction>
+                  </LongitudinalAction>
+               </PrivateAction>
+            </Private>'''
+
+
+def build_ego_init_block(host_speed_ms: float) -> str:
+    """
+    Migration slice 3 (Init, Ego only): build the Ego Init private block with
+    scenariogeneration when available, otherwise the manual XML. Equivalent and
+    esmini-compatible (the route assignment gives the ego its travel heading).
+    """
+    if _SCENARIOGENERATION_AVAILABLE:
+        try:
+            return _sg_build_ego_init_xml(host_speed_ms)
+        except Exception:
+            return _manual_ego_init(host_speed_ms)
+    return _manual_ego_init(host_speed_ms)
+
+
 def build_xosc_preview(data: ScenarioRequest) -> str:
     """
     Generate an esmini-compatible OpenSCENARIO file on the fabriksgatan road.
@@ -315,6 +367,9 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
         npc_entity, traffic_vehicle_entities,
     )
 
+    # Migration slice 3: Ego Init block from scenariogeneration (manual fallback).
+    ego_init = build_ego_init_block(host_speed_ms)
+
     # -- Phase 3: headlights at night for vehicle entities (skips pedestrian/cyclist). --
     headlight_entities = ["Ego"]
     if npc["kind"] == "vehicle":
@@ -362,42 +417,7 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
          <Actions>
             {environment_action}
 
-            <Private entityRef="Ego">
-               <PrivateAction>
-                  <RoutingAction>
-                     <AssignRouteAction>
-                        <CatalogReference catalogName="RoutesAtFabriksgatan" entryName="HostStraightRoute"/>
-                     </AssignRouteAction>
-                  </RoutingAction>
-               </PrivateAction>
-
-               <PrivateAction>
-                  <TeleportAction>
-                     <Position>
-                        <RoutePosition>
-                           <RouteRef>
-                              <CatalogReference catalogName="RoutesAtFabriksgatan" entryName="HostStraightRoute"/>
-                           </RouteRef>
-                           <InRoutePosition>
-                              <FromLaneCoordinates pathS="0" laneId="1"/>
-                           </InRoutePosition>
-                        </RoutePosition>
-                     </Position>
-                  </TeleportAction>
-               </PrivateAction>
-
-               <PrivateAction>
-                  <LongitudinalAction>
-                     <SpeedAction>
-                        <SpeedActionDynamics dynamicsShape="step" value="0.0" dynamicsDimension="time"/>
-                        <SpeedActionTarget>
-                           <AbsoluteTargetSpeed value="$HostSpeed"/>
-                        </SpeedActionTarget>
-                     </SpeedAction>
-                  </LongitudinalAction>
-               </PrivateAction>
-            </Private>
-
+            {ego_init}
 {npc_init}{traffic_vehicle_init_actions}
          </Actions>
       </Init>
