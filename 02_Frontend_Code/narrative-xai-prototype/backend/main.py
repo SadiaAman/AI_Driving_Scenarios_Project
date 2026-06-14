@@ -1021,9 +1021,11 @@ def refine_scenario(data: RefineRequest):
     ]
     original = {f: getattr(data, f) for f, _ in fields}
 
-    # Prefer the LLM parser (Anthropic Claude) when available; otherwise use the
+    # Prefer the LLM parser (Gemini, then Claude) when available; otherwise use the
     # keyword parser. Either way the result is the same shape, and the LLM path
     # can never break refinement (it returns None on any issue).
+    # NOTE: the LLM SYSTEM INSTRUCTIONS (Role / Task / Context / Example / Format /
+    # Boundaries / Note) live in llm_refine.py as the `_SYSTEM` constant.
     overrides = None
     provider_label = "keyword rules"
     try:

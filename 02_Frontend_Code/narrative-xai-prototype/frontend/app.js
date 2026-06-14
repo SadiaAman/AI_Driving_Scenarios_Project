@@ -93,6 +93,23 @@ updateBehaviourOptions();
 updatePreview();
 
 // Render a generate/refine result into the result card.
+// --- Pipeline status indicator -------------------------------------------
+// Each step starts "pending" (grey ○) and turns "done" (green ✓) only when it
+// has actually happened, so the strip reflects real progress.
+const PIPELINE_STEPS = ["pl-parse", "pl-generate", "pl-validate", "pl-refine", "pl-export"];
+
+function setPipelineStep(id, done) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle("done", done);
+  el.classList.toggle("pending", !done);
+  el.querySelector("b").textContent = done ? "✓" : "○";
+}
+
+function resetPipeline() {
+  PIPELINE_STEPS.forEach(id => setPipelineStep(id, false));
+}
+
 function renderScenarioResult(result) {
   document.getElementById("logBox").textContent = result.pipeline_log.join("\n");
   document.getElementById("resultCard").classList.remove("hidden");
@@ -102,6 +119,10 @@ function renderScenarioResult(result) {
   fileLink.href = `${API_BASE}/download-xosc`;
   document.getElementById("fileMeta").textContent = `Generated just now · ${result.actors} actors · ${result.duration}s duration${result.improved ? " · ★ improved behavior" : ""}`;
   document.getElementById("xmlPreview").textContent = result.xosc_preview;
+  // A generate/refine just succeeded: prompt parsed, XOSC built, file exportable.
+  setPipelineStep("pl-parse", true);
+  setPipelineStep("pl-generate", true);
+  setPipelineStep("pl-export", true);
   document.getElementById("resultCard").scrollIntoView({ behavior: "smooth" });
 }
 
@@ -160,6 +181,7 @@ document.getElementById("runBtn").addEventListener("click", async () => {
     const res = await fetch(`${API_BASE}/run-esmini`, { method: "POST" });
     const result = await res.json();
     document.getElementById("logBox").textContent += `\n${result.message}`;
+    if (res.ok) setPipelineStep("pl-validate", true);  // validated by running in esmini
   } catch (err) {
     document.getElementById("logBox").textContent += `\n✗ Could not run esmini: ${err.message}`;
   }
@@ -195,6 +217,7 @@ document.getElementById("refineBtn").addEventListener("click", async () => {
 
     syncFormToParams(result.params);   // reflect the new parameters in the form
     renderScenarioResult(result);      // show the new file + change log
+    setPipelineStep("pl-refine", true);  // an LLM/keyword refinement was applied
     document.getElementById("refineText").value = "";
   } catch (err) {
     document.getElementById("logBox").textContent += `\n✗ Refine failed: ${err.message}\nMake sure backend is running: uvicorn main:app --reload`;
@@ -283,8 +306,12 @@ function startNewScenario() {
   document.getElementById("logBox").textContent = "Waiting for scenario generation...";
   document.getElementById("refineText").value = "";
   latestFilename = null;
+  resetPipeline();   // back to all-pending
 
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 document.getElementById("newScenarioBtn").addEventListener("click", startNewScenario);
+
+// Start with the pipeline in its honest "nothing done yet" state.
+resetPipeline();

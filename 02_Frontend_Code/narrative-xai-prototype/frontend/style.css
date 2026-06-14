@@ -41,8 +41,14 @@ li { padding: 7px 0; border-bottom: 1px solid #ddd8cc; }
 button { border: 1px solid var(--line); background: white; border-radius: 10px; padding: 12px 18px; font-size: 15px; cursor: pointer; font-weight: 700; }
 button:hover { border-color: var(--green); }
 
-.pipeline { display:flex; justify-content:space-between; text-align:center; color: var(--green); font-weight: 800; margin: 16px 0; }
-.pipeline span { color: #55776b; font-size: 13px; font-weight: 700; }
+.pipeline { display:flex; justify-content:space-between; text-align:center; font-weight: 800; margin: 16px 0; }
+.pipeline span { font-size: 13px; font-weight: 700; }
+/* Pending = muted grey; Done = green. Driven by app.js as steps complete. */
+.pipeline .pending { color: #b7b3aa; }
+.pipeline .pending span { color: #b7b3aa; }
+.pipeline .done { color: var(--green); }
+.pipeline .done span { color: #55776b; }
+.pipeline div { transition: color .25s ease; }
 .log, .code { background: #f1f0ec; border-radius: 10px; padding: 18px; overflow:auto; line-height: 1.5; color: #3f3d38; }
 .code { min-height: 280px; max-height: 420px; overflow-y: auto; overflow-x: auto; }
 .refine-row input { flex: 1; min-width: 220px; }

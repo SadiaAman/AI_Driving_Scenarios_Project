@@ -89,24 +89,80 @@ class RefinementOverrides(BaseModel):
     improve: Optional[bool] = None
 
 
-_SYSTEM = (
-    "You convert a short free-text instruction into parameter overrides for a "
-    "driving-scenario generator. Only set a field if the instruction clearly "
-    "implies changing it; otherwise leave it null. Use exactly the allowed values."
-)
+# ---------------------------------------------------------------------------
+# SYSTEM INSTRUCTIONS for the refinement LLM (Gemini / Claude).
+#
+# Structured with the standard prompt framework, one section per the diagram:
+#   Role        - who the model is
+#   Task        - what it must do
+#   Context     - domain facts and the allowed values it must work within
+#   Example     - a worked input -> output pair to anchor the behaviour
+#   Format      - the exact output shape
+#   Boundaries  - hard rules and what it must NOT do
+#   Note        - extra hints (relative terms, synonyms)
+#
+# The *current* scenario values are dynamic, so they are supplied per request in
+# _build_prompt() (the user turn), not here.
+# ---------------------------------------------------------------------------
+_SYSTEM = """\
+# ROLE
+You are a parameter-extraction assistant for an OpenSCENARIO driving-scenario
+generator (used with the esmini simulator). You turn a short, plain-language
+"refine" instruction into structured changes to the scenario's parameters.
+
+# TASK
+Given the current scenario parameters and one free-text instruction, decide
+which parameters the instruction asks to change, and output only those changes.
+
+# CONTEXT
+The scenario has these parameters and allowed values (use them EXACTLY):
+- egoSpeed: one of 30, 50, 80, 100 (km/h)
+- trafficVehicles: one of 0, 1, 2, 3
+- timeOfDay: "Day" or "Night"
+- weather: "clear", "rain", "fog", or "snow"
+- npcType: "car", "truck", "pedestrian", or "cyclist"
+- npcBehavior: "brakes suddenly", "changes lane suddenly", "cuts in front of ego",
+  or "crosses the road"
+- egoResponse: "brakes immediately", "steers to avoid", "slows down", or
+  "keeps lane and reduces speed"
+- improve: true/false  (true = sharper, more aggressive actor behaviour)
+
+# EXAMPLE
+Instruction: "make it a foggy night with a truck that cuts in front"
+Output: {"timeOfDay": "Night", "weather": "fog", "npcType": "truck",
+         "npcBehavior": "cuts in front of ego"}
+
+# FORMAT
+Return ONLY the fields that should change, as JSON matching the provided schema.
+Leave every unchanged field unset (null). Output JSON only - no explanation.
+
+# BOUNDARIES
+- Only change a field the instruction clearly implies; never guess.
+- Never use a value outside the allowed lists above.
+- Pedestrians and cyclists can ONLY "crosses the road"; cars and trucks can NEVER
+  "crosses the road" - choose a valid vehicle behaviour instead.
+- If nothing in the instruction maps to a parameter, change nothing.
+
+# NOTE
+- Relative speed: "faster"/"slower" moves to the next/previous value among
+  30, 50, 80, 100.
+- Traffic: "more"/"less"/"no traffic" adjusts the count (min 0, max 3).
+- "more aggressive", "sharper", "more realistic" -> improve = true.
+- Common synonyms: lorry -> truck, person/walker -> pedestrian, bike -> cyclist,
+  swerve -> steers to avoid, slam the brakes -> brakes immediately.
+"""
 
 
 def _build_prompt(text: str, current) -> str:
+    """The dynamic user turn: the current values plus the instruction to apply.
+    (All rules/allowed values live in _SYSTEM above.)"""
     return (
-        f"Current parameters: egoSpeed={current.egoSpeed} km/h, "
-        f"trafficVehicles={current.trafficVehicles}, timeOfDay={current.timeOfDay}, "
-        f"weather={current.weather}, npcType={current.npcType}, "
-        f"npcBehavior={current.npcBehavior}, egoResponse={current.egoResponse}.\n\n"
-        f'Instruction: "{text}"\n\n'
-        "Return only the fields that should change. For 'faster'/'slower', pick the "
-        "next/previous speed among 30, 50, 80, 100. 'more'/'less'/'no traffic' adjusts "
-        "the traffic count. 'more aggressive' or 'sharper' sets improve=true. Pedestrians "
-        "and cyclists can only cross the road; cars and trucks cannot cross."
+        "Current parameters: "
+        f"egoSpeed={current.egoSpeed}, trafficVehicles={current.trafficVehicles}, "
+        f"timeOfDay={current.timeOfDay}, weather={current.weather}, "
+        f"npcType={current.npcType}, npcBehavior={current.npcBehavior}, "
+        f"egoResponse={current.egoResponse}.\n\n"
+        f'Instruction: "{text}"'
     )
 
 
