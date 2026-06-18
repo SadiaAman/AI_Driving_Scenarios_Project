@@ -2,18 +2,18 @@
 <OpenSCENARIO>
    <FileHeader revMajor="1"
                revMinor="1"
-               date="2026-06-07T00:00:00"
+               date="2026-06-07T00:12:00"
                description="Narrative XAI generated pedestrian scenario"
                author="Sadia Aman"/>
 
    <ParameterDeclarations>
       <ParameterDeclaration name="HostVehicle" parameterType="string" value="car_white"/>
-      <ParameterDeclaration name="HostSpeed" parameterType="double" value="10"/>
+      <ParameterDeclaration name="HostSpeed" parameterType="double" value="13.89"/>
       <ParameterDeclaration name="PedestrianSpeed" parameterType="double" value="1.5"/>
-      <ParameterDeclaration name="WeatherCondition" parameterType="string" value="clear"/>
+      <ParameterDeclaration name="WeatherCondition" parameterType="string" value="rain"/>
       <ParameterDeclaration name="NPCType" parameterType="string" value="fast car"/>
-      <ParameterDeclaration name="NPCBehaviour" parameterType="string" value="changes lane suddenly"/>
-      <ParameterDeclaration name="EgoResponse" parameterType="string" value="slows down"/>
+      <ParameterDeclaration name="NPCBehaviour" parameterType="string" value="brakes suddenly"/>
+      <ParameterDeclaration name="EgoResponse" parameterType="string" value="brakes immediately"/>
    </ParameterDeclarations>
 
    <CatalogLocations>
@@ -63,9 +63,9 @@
                      <Weather cloudState="free">
                         <Sun intensity="1.0" azimuth="0" elevation="1.31"/>
                         <Fog visualRange="100000"/>
-                        <Precipitation precipitationType="dry" intensity="0.0"/>
+                        <Precipitation precipitationType="rain" intensity="0.1"/>
                      </Weather>
-                     <RoadCondition frictionScaleFactor="1.0"/>
+                     <RoadCondition frictionScaleFactor="0.7"/>
                   </Environment>
                </EnvironmentAction>
             </GlobalAction>

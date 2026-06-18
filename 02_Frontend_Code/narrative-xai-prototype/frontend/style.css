@@ -53,6 +53,9 @@ button:hover { border-color: var(--green); }
 .code { min-height: 280px; max-height: 420px; overflow-y: auto; overflow-x: auto; }
 .refine-row input { flex: 1; min-width: 220px; }
 .hidden { display:none; }
+.custom-speed-row { display:flex; align-items:center; gap:8px; margin-top:6px; }
+.custom-speed-row input { width: 110px; }
+.custom-speed-row span { color:#6b6862; font-size:13px; }
 #comparePanel { margin-top: 16px; }
 .compare-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
 .compare-table th, .compare-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e3e0d8; }

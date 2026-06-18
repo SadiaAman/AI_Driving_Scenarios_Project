@@ -41,9 +41,22 @@ except Exception:
 GENERATED_DIR = BASE_DIR / "generated"
 GENERATED_DIR.mkdir(exist_ok=True)
 LATEST_XOSC_PATH = None
+LATEST_XODR_PATH = None  # the road (.xodr) file used by the latest scenario
 
 PROJECT_DIR = BASE_DIR.parents[2]
 ESMINI_DEMO_DIR = PROJECT_DIR / "03_esmini" / "esmini-demo"
+
+
+def road_files_for(data) -> tuple:
+    """
+    Return (logic_file, scene_graph_file) Paths for a scenario. Currently always
+    the fabriksgatan road regardless of laneCount — variable road geometry is a
+    later phase. Centralised here so the XOSC reference and the /download-xodr
+    file always stay in sync.
+    """
+    resources = ESMINI_DEMO_DIR / "resources"
+    return (resources / "xodr" / "fabriksgatan.xodr",
+            resources / "models" / "fabriksgatan.osgb")
 
 ESMINI_EXE = os.getenv(
     "ESMINI_EXE",
@@ -70,6 +83,12 @@ class ScenarioRequest(BaseModel):
     npcBehavior: str
     egoResponse: str
     prompt: str
+    # Target road width. Recorded as metadata now; the road geometry is applied
+    # in a later phase (it stays the fabriksgatan road for the moment).
+    laneCount: int = 2
+    # NPC actor speed in km/h. Recorded/logged now; applied to the NPC's actual
+    # movement in a later phase.
+    npcSpeed: float = 30.0
     # When true, "Improve actor behavior" intensifies the NPC and ego maneuvers
     # (harder/earlier braking, faster cut-in/lane-change, more sudden crossing).
     # Defaults to false so normal generation is unchanged.
@@ -284,6 +303,9 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
 
     # esmini expects speed in m/s. Convert ego speed from km/h to m/s.
     host_speed_ms = round(data.egoSpeed / 3.6, 2)
+    # NPC speed km/h -> m/s. Recorded as a parameter now; applied to the NPC's
+    # actual movement in a later phase.
+    npc_speed_ms = round(data.npcSpeed / 3.6, 2)
 
     (
         date_time,
@@ -304,8 +326,9 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
     resources_dir = (ESMINI_DEMO_DIR / "resources").as_posix()
     route_catalog_dir = f"{resources_dir}/xosc/Catalogs/Routes"
     vehicle_catalog_dir = f"{resources_dir}/xosc/Catalogs/Vehicles"
-    logic_file = f"{resources_dir}/xodr/fabriksgatan.xodr"
-    scene_graph_file = f"{resources_dir}/models/fabriksgatan.osgb"
+    _logic_path, _scene_path = road_files_for(data)
+    logic_file = _logic_path.as_posix()
+    scene_graph_file = _scene_path.as_posix()
     pedestrian_model = f"{resources_dir}/models/walkman.osgb"
 
     # -- Step 3/4: build the NPC entity, its init placement, and its maneuver. --
@@ -394,6 +417,8 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
       <ParameterDeclaration name="NPCBehaviour" parameterType="string" value="{data.npcBehavior}"/>
       <ParameterDeclaration name="EgoResponse" parameterType="string" value="{data.egoResponse}"/>
       <ParameterDeclaration name="Improved" parameterType="boolean" value="{str(data.improve).lower()}"/>
+      <ParameterDeclaration name="LaneCount" parameterType="integer" value="{data.laneCount}"/>
+      <ParameterDeclaration name="NpcSpeed" parameterType="double" value="{npc_speed_ms}"/>
    </ParameterDeclarations>
 
    <CatalogLocations>
@@ -486,12 +511,16 @@ def _ego_traveled_trigger(condition_name: str, distance: float) -> str:
                      </StartTrigger>'''
 
 
-def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float, pedestrian_model: str):
+def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float,
+              pedestrian_model: str, npc_speed_ms: float):
     """
     Step 3 + Step 4: build the main "other actor".
 
     Returns (npc_entity, npc_init, npc_maneuver_group) XML fragments. The entity
     is always named "NPC" so triggers elsewhere can reference it regardless of type.
+
+    npc_speed_ms is the user-selected NPC speed (m/s): the lead vehicle's drive
+    speed for car/truck, and the crossing speed for pedestrian/cyclist.
 
     When data.improve is set, the maneuver is intensified (more sudden crossing,
     harder/faster vehicle maneuvers) to give a sharper "improved behaviour" variant.
@@ -534,10 +563,9 @@ def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float, pedestrian
             </Private>'''
 
         # --- Maneuver: walk/ride across the road on the proven trajectory ---
-        # The crossing keeps its normal pace even in improved mode: for a
-        # pedestrian/cyclist safety scenario, "improve" sharpens the EGO reaction
-        # (reliable, early brake), not the vulnerable road user's behaviour.
-        cross_speed = npc["speed"]
+        # Cross at the user-selected NPC speed. "improve" sharpens the EGO
+        # reaction (reliable, early brake), not the vulnerable road user's speed.
+        cross_speed = npc_speed_ms
         cross_accel = "2"
         start_trigger = _ego_traveled_trigger("npc_cross_condition", 5)
         npc_maneuver_group = f'''
@@ -576,7 +604,8 @@ def build_npc(data: ScenarioRequest, npc: dict, host_speed_ms: float, pedestrian
         return npc_entity, npc_init, npc_maneuver_group
 
     # ----------------------------- vehicle NPC -----------------------------
-    npc_speed = max(round(host_speed_ms * npc.get("speed_factor", 0.5), 2), 2.0)
+    # The lead vehicle drives at the user-selected NPC speed (m/s).
+    npc_speed = max(npc_speed_ms, 0.5)
 
     # "cuts in front of ego" starts in the neighbouring lane (2) and moves into
     # ego's lane (1); everything else starts directly ahead in ego's lane (1).
@@ -887,15 +916,19 @@ def generate_scenario(data: ScenarioRequest):
     xosc_path = GENERATED_DIR / filename
     xosc_path.write_text(xosc, encoding="utf-8")
 
-    global LATEST_XOSC_PATH
+    global LATEST_XOSC_PATH, LATEST_XODR_PATH
     LATEST_XOSC_PATH = xosc_path
+    LATEST_XODR_PATH = road_files_for(data)[0]  # road file this scenario uses
 
     num_traffic_vehicles = min(max(data.trafficVehicles, 0), 3)
     actual_actor_count = 2 + num_traffic_vehicles  # Ego + pedestrian + traffic vehicles
+    npc_speed_ms = round(data.npcSpeed / 3.6, 2)
 
     pipeline_log = [
         f"› Parsing prompt: \"{data.prompt[:80]}...\"",
         "› Sending structured prompt to generator...",
+        f"› Road: {data.laneCount}-lane (road geometry applied in a later phase).",
+        f"› NPC speed: {data.npcSpeed} km/h ({npc_speed_ms} m/s) — recorded; applied to NPC movement in a later phase.",
         "› trafficVehicles received; vehicle generation is currently prototype-only and may not produce full XOSC traffic behavior.",
         f"✓ XOSC generated — {actual_actor_count} actors, 14.2 s duration",
     ]
@@ -914,6 +947,9 @@ def generate_scenario(data: ScenarioRequest):
         "actors": actual_actor_count,
         "duration": 14.2,
         "improved": data.improve,
+        "laneCount": data.laneCount,
+        "npcSpeed": data.npcSpeed,
+        "npcSpeedMs": npc_speed_ms,
         "xosc_preview": xosc,
         "pipeline_log": pipeline_log,
     }
@@ -1060,8 +1096,9 @@ def refine_scenario(data: RefineRequest):
     xosc_path = GENERATED_DIR / filename
     xosc_path.write_text(xosc, encoding="utf-8")
 
-    global LATEST_XOSC_PATH
+    global LATEST_XOSC_PATH, LATEST_XODR_PATH
     LATEST_XOSC_PATH = xosc_path
+    LATEST_XODR_PATH = road_files_for(refined)[0]
 
     num_traffic_vehicles = min(max(refined.trafficVehicles, 0), 3)
     actual_actor_count = 2 + num_traffic_vehicles
@@ -1120,6 +1157,23 @@ def download_xosc():
         raise HTTPException(status_code=404, detail="Generate a scenario first.")
 
     return FileResponse(str(xosc_path), filename=xosc_path.name)
+
+
+def get_current_xodr_path() -> Path | None:
+    """Road file for the latest scenario (falls back to the default road)."""
+    if LATEST_XODR_PATH and LATEST_XODR_PATH.exists():
+        return LATEST_XODR_PATH
+    default = ESMINI_DEMO_DIR / "resources" / "xodr" / "fabriksgatan.xodr"
+    return default if default.exists() else None
+
+
+@app.get("/download-xodr")
+def download_xodr():
+    xodr_path = get_current_xodr_path()
+    if not xodr_path or not xodr_path.exists():
+        raise HTTPException(status_code=404, detail="No road file available.")
+
+    return FileResponse(str(xodr_path), filename=xodr_path.name)
 
 
 @app.get("/list-scenarios")

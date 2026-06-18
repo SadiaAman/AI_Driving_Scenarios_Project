@@ -1,6 +1,16 @@
 const API_BASE = "http://127.0.0.1:8000";
-const fields = ["egoSpeed", "trafficVehicles", "weather", "timeOfDay", "npcType", "npcBehavior", "egoResponse"];
+const fields = ["egoSpeed", "trafficVehicles", "timeOfDay", "laneCount", "weather", "npcType", "npcBehavior", "egoResponse", "npcSpeed"];
 let latestFilename = null;
+
+// Resolve the NPC speed (km/h) from the dropdown, or the custom input when
+// "Custom speed…" is selected. Returns "" if missing/invalid so the form stays
+// incomplete until a positive, reasonable value (1–200 km/h) is given.
+function resolveNpcSpeed() {
+  const sel = document.getElementById("npcSpeed").value;
+  if (sel !== "custom") return sel;
+  const v = parseFloat(document.getElementById("npcSpeedCustom").value);
+  return (Number.isFinite(v) && v >= 1 && v <= 200) ? String(v) : "";
+}
 
 // Which behaviours make sense for each actor type. Pedestrians and cyclists
 // cross the road; cars and trucks drive ahead and can brake or change lane.
@@ -36,7 +46,9 @@ function updateBehaviourOptions() {
 }
 
 function getData() {
-  return Object.fromEntries(fields.map(id => [id, document.getElementById(id).value]));
+  const d = Object.fromEntries(fields.map(id => [id, document.getElementById(id).value]));
+  d.npcSpeed = resolveNpcSpeed();   // override with the resolved/validated value
+  return d;
 }
 
 function isFormComplete(d = getData()) {
@@ -48,7 +60,7 @@ function makePrompt(d = getData()) {
     return "Please select all scenario parameters to generate a prompt.";
   }
 
-  return `The ego vehicle is travelling at ${d.egoSpeed} km/h in ${d.weather} conditions during ${d.timeOfDay.toLowerCase()}. A ${d.npcType} ${d.npcBehavior}. The ego vehicle ${d.egoResponse}.`;
+  return `The ego vehicle is travelling at ${d.egoSpeed} km/h on a ${d.laneCount}-lane road in ${d.weather} conditions during ${d.timeOfDay.toLowerCase()}. A ${d.npcType} travelling at ${d.npcSpeed} km/h ${d.npcBehavior}. The ego vehicle ${d.egoResponse}.`;
 }
 
 function updatePreview() {
@@ -62,11 +74,13 @@ function updatePreview() {
   const checklistItems = [
     { label: "Ego vehicle speed selected", done: !!d.egoSpeed },
     { label: "Number of traffic vehicles selected", done: !!d.trafficVehicles },
-    { label: "Weather conditions set", done: !!d.weather },
     { label: "Time of day chosen", done: !!d.timeOfDay },
+    { label: "Number of lanes selected", done: !!d.laneCount },
+    { label: "Weather conditions set", done: !!d.weather },
     { label: "NPC actor specified", done: !!d.npcType },
     { label: "NPC behaviour described", done: !!d.npcBehavior },
-    { label: "Ego response defined", done: !!d.egoResponse }
+    { label: "Ego response defined", done: !!d.egoResponse },
+    { label: "NPC speed set", done: !!d.npcSpeed }
   ];
 
   document.getElementById("checklist").innerHTML = checklistItems
@@ -89,6 +103,16 @@ function updatePreview() {
 fields.forEach(id => document.getElementById(id).addEventListener("change", updatePreview));
 // When the actor type changes, rebuild the behaviour list to match it.
 document.getElementById("npcType").addEventListener("change", updateBehaviourOptions);
+
+// Show the custom NPC-speed input only when "Custom speed…" is selected.
+function updateNpcSpeedUi() {
+  const isCustom = document.getElementById("npcSpeed").value === "custom";
+  document.getElementById("npcSpeedCustomRow").classList.toggle("hidden", !isCustom);
+}
+document.getElementById("npcSpeed").addEventListener("change", () => { updateNpcSpeedUi(); updatePreview(); });
+document.getElementById("npcSpeedCustom").addEventListener("input", updatePreview);
+updateNpcSpeedUi();
+
 updateBehaviourOptions();
 updatePreview();
 
@@ -189,6 +213,10 @@ document.getElementById("runBtn").addEventListener("click", async () => {
 
 document.getElementById("exportBtn").addEventListener("click", () => {
   window.open(`${API_BASE}/download-xosc`, "_blank");
+});
+
+document.getElementById("exportXodrBtn").addEventListener("click", () => {
+  window.open(`${API_BASE}/download-xodr`, "_blank");
 });
 
 document.getElementById("refineBtn").addEventListener("click", async () => {
@@ -296,6 +324,9 @@ document.getElementById("compareB").addEventListener("change", renderCompare);
 function startNewScenario() {
   // Reset every dropdown back to its placeholder.
   fields.forEach(id => { document.getElementById(id).value = ""; });
+  // Reset the custom NPC-speed input and hide its row.
+  document.getElementById("npcSpeedCustom").value = "";
+  updateNpcSpeedUi();
   // Rebuild the behaviour list (clears it back to "select actor type first")
   // and refresh the prompt preview, checklist and progress bar.
   updateBehaviourOptions();

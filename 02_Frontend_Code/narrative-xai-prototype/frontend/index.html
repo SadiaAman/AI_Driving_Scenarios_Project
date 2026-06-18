@@ -44,6 +44,16 @@
             <option value="Night">Night</option>
           </select>
         </label>
+        <label>Number of lanes
+          <select id="laneCount">
+            <option value="" selected disabled>Select number of lanes</option>
+            <option value="2">2</option>
+            <option value="4">4</option>
+            <option value="6">6</option>
+            <option value="8">8</option>
+          </select>
+          <small>Target road width (applied in a later phase).</small>
+        </label>
       </div>
 
       <hr />
@@ -85,6 +95,21 @@
             <option value="keeps lane and reduces speed">keeps lane and reduces speed</option>
           </select>
           <small>How should the ego vehicle react?</small>
+        </label>
+        <label>NPC speed
+          <select id="npcSpeed">
+	    <option value="" selected disabled>Select NPC speed</option>
+            <option value="10">10 km/h</option>
+            <option value="20">20 km/h</option>
+            <option value="30">30 km/h</option>
+            <option value="50">50 km/h</option>
+            <option value="custom">Custom speed…</option>
+          </select>
+          <div id="npcSpeedCustomRow" class="custom-speed-row hidden">
+            <input id="npcSpeedCustom" type="number" min="1" max="200" step="1" placeholder="km/h" />
+            <span>km/h</span>
+          </div>
+          <small>Speed of the main NPC actor.</small>
         </label>
       </div>
 
@@ -139,6 +164,7 @@
         <button id="improveBtn">Improve actor behavior ↗</button>
         <button id="compareBtn">Compare versions</button>
         <button id="exportBtn">Export XOSC</button>
+        <button id="exportXodrBtn">Export XODR</button>
         <button id="runBtn">Run in esmini</button>
       </div>
       <div id="comparePanel" class="panel hidden">
