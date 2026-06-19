@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Narrative XAI Driving Scenario — Variant B (Unstructured)</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="page">
+    <div class="breadcrumb">Presented file ›</div>
+
+    <section class="card">
+      <div class="header-row">
+        <h1>New scenario</h1>
+        <div class="badges"><span>Esmini</span><span>OpenSCENARIO 1.2</span><span class="variant">Variant B</span></div>
+      </div>
+
+      <label for="sceneText">Describe the scenario</label>
+      <textarea id="sceneText" class="scene-text" rows="5"
+        placeholder="Describe the scenario in your own words — e.g. The ego vehicle is travelling at 80 km/h on a highway during light rain. A slow-moving truck pulls out from a side road ahead, and the ego vehicle brakes sharply to avoid a collision."></textarea>
+      <small>Mention road type, weather, NPC actor and behaviour, and ego response if you want them reflected in the generated scenario.</small>
+
+      <div class="action-row">
+        <label class="checkbox"><input id="autoValidate" type="checkbox" checked /> Auto-validate in Esmini</label>
+        <button id="generateBtn">Generate scenario</button>
+      </div>
+
+      <div id="clarifyBox" class="clarify hidden"></div>
+
+      <hr />
+      <h2>Pipeline</h2>
+      <div class="pipeline">
+        <div id="pl-parse" class="pending"><b>○</b><br><span>Prompt<br>parsing</span></div>
+        <div id="pl-generate" class="pending"><b>○</b><br><span>XOSC<br>generation</span></div>
+        <div id="pl-validate" class="pending"><b>○</b><br><span>Esmini<br>validation</span></div>
+        <div id="pl-refine" class="pending"><b>○</b><br><span>LLM<br>refinement</span></div>
+        <div id="pl-export" class="pending"><b>○</b><br><span>Export<br>ready</span></div>
+      </div>
+      <pre id="logBox" class="log">Waiting for scenario description...</pre>
+    </section>
+
+    <section id="resultCard" class="card hidden">
+      <div class="header-row">
+        <div>
+          <h1><a id="fileLink" href="#" target="_blank">scenario.xosc</a></h1>
+          <p id="fileMeta">Generated just now</p>
+        </div>
+        <div class="badges"><span class="valid">Valid</span><span>Latest scenario</span></div>
+      </div>
+
+      <div class="panel">
+        <h3>Parsed parameters</h3>
+        <p class="muted">What the system understood from your description:</p>
+        <table id="parsedTable" class="parsed-table"></table>
+      </div>
+
+      <label>Generated prompt</label>
+      <div id="promptPreview" class="prompt-box"></div>
+
+      <label>Generated XOSC</label>
+      <pre id="xmlPreview" class="code"></pre>
+
+      <div class="button-row">
+        <button id="exportBtn">Export XOSC</button>
+        <button id="exportXodrBtn">Export XODR</button>
+        <button id="runBtn">Run in esmini</button>
+      </div>
+      <button id="newScenarioBtn" class="secondary">← Start new scenario</button>
+    </section>
+  </main>
+  <script src="app_b.js"></script>
+</body>
+</html>

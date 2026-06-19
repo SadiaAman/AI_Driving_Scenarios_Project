@@ -116,6 +116,12 @@ class RefineRequest(ScenarioRequest):
     refineText: str = ""
 
 
+class TextScenarioRequest(BaseModel):
+    # Variant B (unstructured): a natural-language scenario description.
+    text: str
+    autoValidate: bool = True
+
+
 # ---------------------------------------------------------------------------
 # Environment helpers (Step 1: lighting, Step 2: weather visibility)
 # ---------------------------------------------------------------------------
@@ -1160,8 +1166,13 @@ def get_current_xosc_path() -> Path | None:
     return LATEST_XOSC_PATH
 
 
-@app.post("/generate-scenario")
-def generate_scenario(data: ScenarioRequest):
+def generate_and_save(data: ScenarioRequest) -> dict:
+    """
+    Shared generation path for BOTH variants (structured dropdowns and unstructured
+    natural language). Builds the XOSC via build_xosc_preview, saves a versioned
+    file, tracks the latest xosc/xodr for Run/Export, and returns the core result.
+    The two endpoints add their own pipeline_log on top.
+    """
     xosc = build_xosc_preview(data)
     filename = build_scenario_filename(data)
     xosc_path = GENERATED_DIR / filename
@@ -1172,8 +1183,23 @@ def generate_scenario(data: ScenarioRequest):
     LATEST_XODR_PATH = road_files_for(data)[0]  # road file this scenario uses
 
     num_traffic_vehicles = min(max(data.trafficVehicles, 0), 3)
-    actual_actor_count = 2 + num_traffic_vehicles  # Ego + pedestrian + traffic vehicles
-    npc_speed_ms = round(data.npcSpeed / 3.6, 2)
+    actual_actor_count = 2 + num_traffic_vehicles  # Ego + NPC + traffic vehicles
+    return {
+        "filename": filename,
+        "actors": actual_actor_count,
+        "duration": 14.2,
+        "improved": data.improve,
+        "laneCount": data.laneCount,
+        "npcSpeed": data.npcSpeed,
+        "npcSpeedMs": round(data.npcSpeed / 3.6, 2),
+        "xosc_preview": xosc,
+    }
+
+
+@app.post("/generate-scenario")
+def generate_scenario(data: ScenarioRequest):
+    result = generate_and_save(data)
+    npc_speed_ms = result["npcSpeedMs"]
 
     pipeline_log = [
         f"› Parsing prompt: \"{data.prompt[:80]}...\"",
@@ -1181,7 +1207,7 @@ def generate_scenario(data: ScenarioRequest):
         f"› Road: {data.laneCount}-lane (road geometry applied in a later phase).",
         f"› NPC speed: {data.npcSpeed} km/h ({npc_speed_ms} m/s) — recorded; applied to NPC movement in a later phase.",
         "› trafficVehicles received; vehicle generation is currently prototype-only and may not produce full XOSC traffic behavior.",
-        f"✓ XOSC generated — {actual_actor_count} actors, 14.2 s duration",
+        f"✓ XOSC generated — {result['actors']} actors, 14.2 s duration",
     ]
     if data.improve:
         pipeline_log.append(
@@ -1193,17 +1219,214 @@ def generate_scenario(data: ScenarioRequest):
         "✓ Scenario ready for export",
     ]
 
-    return {
-        "filename": filename,
-        "actors": actual_actor_count,
-        "duration": 14.2,
-        "improved": data.improve,
-        "laneCount": data.laneCount,
-        "npcSpeed": data.npcSpeed,
-        "npcSpeedMs": npc_speed_ms,
-        "xosc_preview": xosc,
-        "pipeline_log": pipeline_log,
+    result["pipeline_log"] = pipeline_log
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Variant B (unstructured): rule-based natural-language scenario parser.
+# Produces the SAME ScenarioRequest the structured form does, so both variants
+# share generate_and_save / build_xosc_preview. No LLM here (Gemini comes later).
+# ---------------------------------------------------------------------------
+_UNSUPPORTED_ACTORS = ("dog", "cat", "deer", "horse", "moose", "cow", "bird", "animal")
+
+
+def parse_scenario_text(text: str):
+    """
+    Parse a natural-language description into (ScenarioRequest|None, parsed dict,
+    messages). On any clarification/validation issue the request is None and the
+    messages explain what to fix; the parsed dict always reflects what was
+    understood (with safe defaults) so the UI can preview it.
+    """
+    t = (text or "").lower()
+    messages: list[str] = []
+
+    speeds = [int(s) for s in re.findall(r"(\d{1,3})\s*km", t)]
+
+    # Ego speed (first km/h mention).
+    ego_speed = speeds[0] if speeds else None
+    if ego_speed is not None and not (5 <= ego_speed <= 130):
+        messages.append("Ego speed is outside the supported range. Please use a realistic road speed.")
+        ego_speed = None
+
+    # NPC speed (second km/h mention, or a qualitative cue).
+    npc_speed = None
+    if len(speeds) >= 2 and 1 <= speeds[1] <= 130:
+        npc_speed = float(speeds[1])
+    elif "slow" in t:
+        npc_speed = 20.0
+    elif "fast" in t or "speeding" in t:
+        npc_speed = 60.0
+
+    # Time of day.
+    if any(w in t for w in ("night", "evening", "dark", "midnight")):
+        time_of_day = "Night"
+    elif any(w in t for w in ("day", "daytime", "morning", "afternoon", "noon")):
+        time_of_day = "Day"
+    else:
+        time_of_day = None
+
+    # Weather.
+    weather = None
+    if "clear" in t or "sunny" in t:
+        weather = "clear"
+    if "rain" in t:
+        weather = "rain"
+    if "fog" in t:
+        weather = "fog"
+    if "snow" in t:
+        weather = "snow"
+
+    # Lane count / road type (an explicit "N-lane" wins; else road-type keyword,
+    # preferring the ego's main road type, e.g. highway, over "side road").
+    lane_count = None
+    lm = re.search(r"(\d)\s*[- ]?lane", t)
+    if lm:
+        lane_count = min((2, 4, 6, 8), key=lambda p: abs(p - int(lm.group(1))))
+    elif any(w in t for w in ("highway", "motorway", "freeway")):
+        lane_count = 4
+    elif any(w in t for w in ("two-lane", "two lane", "single", "side road", "residential")):
+        lane_count = 2
+
+    # Traffic vehicles.
+    traffic = None
+    if any(w in t for w in ("no traffic", "without traffic", "no other")):
+        traffic = 0
+    else:
+        tm = re.search(r"(\d)\s*(?:other\s+)?(?:cars|vehicles|traffic)", t)
+        if tm:
+            traffic = min(int(tm.group(1)), 3)
+
+    # NPC / actor type. Prefer specific actors over the generic "car/vehicle",
+    # and ignore the ego's own "vehicle" so "ego vehicle" / background "cars in
+    # traffic" don't get mistaken for the NPC.
+    npc_text = t.replace("ego vehicle", "ego").replace("ego car", "ego").replace("host vehicle", "host")
+    if "truck" in t or "lorry" in t:
+        npc_type = "truck"
+    elif any(w in t for w in ("cyclist", "bicycle", "bike rider")) or re.search(r"\bbike\b", t):
+        npc_type = "cyclist"
+    elif any(w in t for w in ("pedestrian", "person", "walker", "child")):
+        npc_type = "pedestrian"
+    elif re.search(r"\bcars?\b", npc_text) or re.search(r"\bvehicle\b", npc_text):
+        npc_type = "car"
+    else:
+        npc_type = None
+    for animal in _UNSUPPORTED_ACTORS:
+        if re.search(rf"\b{animal}\b", t):
+            messages.append(
+                f"Unsupported actor: {animal}. Supported actors are car, truck, pedestrian, and cyclist."
+            )
+            break
+
+    # NPC behaviour.
+    if any(w in t for w in ("cuts in", "cut in", "cut-in", "pulls out", "pull out", "merge")):
+        npc_behavior = "cuts in front of ego"
+    elif "lane" in t and ("change" in t or "switch" in t):
+        npc_behavior = "changes lane suddenly"
+    elif any(w in t for w in ("crosses", "cross the road", "walks across", "walk across", "crossing")):
+        npc_behavior = "crosses the road"
+    elif any(w in t for w in ("brakes suddenly", "stops suddenly", "sudden brake", "slams")):
+        npc_behavior = "brakes suddenly"
+    else:
+        npc_behavior = None
+
+    # Ego response.
+    if any(w in t for w in ("steer", "swerve", "avoid")):
+        ego_response = "steers to avoid"
+    elif "keep" in t and "lane" in t:
+        ego_response = "keeps lane and reduces speed"
+    elif any(w in t for w in ("slows", "slow down", "reduce speed", "reduces speed")):
+        ego_response = "slows down"
+    elif any(w in t for w in ("brake", "brakes", "stops", "emergency", "hard stop")):
+        ego_response = "brakes immediately"
+    else:
+        ego_response = None
+
+    # Consistency (pedestrian/cyclist only cross; car/truck cannot cross).
+    if npc_type in ("pedestrian", "cyclist") and npc_behavior and npc_behavior != "crosses the road":
+        messages.append(
+            f"The behaviour '{npc_behavior}' is not suitable for {npc_type}. "
+            "Please use 'crosses the road' or choose a vehicle actor."
+        )
+    if npc_type in ("car", "truck") and npc_behavior == "crosses the road":
+        messages.append(
+            f"The behaviour 'crosses the road' is not suitable for {npc_type}. "
+            "Please use a vehicle behaviour like 'brakes suddenly' or 'cuts in front of ego'."
+        )
+
+    # Ambiguity / missing-core clarifications (only if no hard error yet).
+    if not messages:
+        if npc_type and not npc_behavior:
+            messages.append(
+                "Please specify the actor type and behaviour, for example: car brakes suddenly, "
+                "pedestrian crosses the road, or truck cuts in front of ego."
+            )
+        elif any(v is None for v in (ego_speed, npc_type, npc_behavior, ego_response)):
+            messages.append(
+                "Please provide more details such as ego speed, weather, NPC actor, "
+                "NPC behaviour, and ego response."
+            )
+
+    # Parsed preview (final values with safe defaults applied where reasonable).
+    parsed = {
+        "egoSpeed": ego_speed,
+        "trafficVehicles": traffic if traffic is not None else 0,
+        "laneCount": lane_count or 2,
+        "timeOfDay": time_of_day or "Day",
+        "weather": weather or "clear",
+        "npcType": npc_type,
+        "npcSpeed": npc_speed if npc_speed is not None else 30.0,
+        "npcBehavior": npc_behavior,
+        "egoResponse": ego_response,
     }
+
+    if messages:
+        return None, parsed, messages
+
+    data = ScenarioRequest(
+        egoSpeed=ego_speed,
+        trafficVehicles=parsed["trafficVehicles"],
+        weather=parsed["weather"],
+        timeOfDay=parsed["timeOfDay"],
+        npcType=npc_type,
+        npcBehavior=npc_behavior,
+        egoResponse=ego_response,
+        prompt=text,
+        laneCount=parsed["laneCount"],
+        npcSpeed=parsed["npcSpeed"],
+    )
+    return data, parsed, []
+
+
+@app.post("/generate-from-text")
+def generate_from_text(req: TextScenarioRequest):
+    data, parsed, messages = parse_scenario_text(req.text)
+    snippet = (req.text or "").strip()[:80]
+
+    if data is None:
+        return {
+            "ok": False,
+            "parsed": parsed,
+            "messages": messages,
+            "pipeline_log": [
+                f'› Parsing description: "{snippet}..."',
+                "✗ Prompt parsing failed — clarification needed:",
+                *[f"  • {m}" for m in messages],
+            ],
+        }
+
+    result = generate_and_save(data)
+    result["ok"] = True
+    result["parsed"] = parsed
+    result["pipeline_log"] = [
+        f'› Parsing description: "{snippet}..."',
+        "✓ Prompt parsed — see parsed parameters below.",
+        f"✓ XOSC generated — {result['actors']} actors on a {data.laneCount}-lane road.",
+        "› Esmini validation — runs when you click Run in esmini.",
+        "› LLM refinement — not used in this step (current development version uses a rule-based parser).",
+        "✓ Scenario ready for export.",
+    ]
+    return result
 
 
 SPEED_PRESETS = [30, 50, 80, 100]
