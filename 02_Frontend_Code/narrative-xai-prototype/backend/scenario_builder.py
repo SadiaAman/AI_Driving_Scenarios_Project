@@ -13,33 +13,9 @@ which is self-contained and easy to validate in isolation.
 """
 
 from datetime import datetime
-from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from scenariogeneration import xosc, xodr
-
-
-def build_lane_road_xodr(lane_count: int, out_dir) -> Path:
-    """
-    Phase 4: generate (and cache) a straight OpenDRIVE road with `lane_count`
-    driving lanes total — lane_count/2 in each direction. esmini renders the
-    road from this .xodr alone (no separate 3D model needed). Returns the path.
-    """
-    per_side = max(1, lane_count // 2)
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"road_{lane_count}lane.xodr"
-    if path.exists():
-        return path  # cached
-
-    road = xodr.create_road(
-        xodr.Line(200), id=0, left_lanes=per_side, right_lanes=per_side
-    )
-    odr = xodr.OpenDrive(f"road_{lane_count}lane")
-    odr.add_road(road)
-    odr.adjust_roads_and_lanes()
-    odr.write_xml(str(path))
-    return path
+from scenariogeneration import xosc
 
 
 def build_environment(

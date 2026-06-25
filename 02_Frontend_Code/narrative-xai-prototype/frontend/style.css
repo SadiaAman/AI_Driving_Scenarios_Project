@@ -31,9 +31,6 @@ hr { border: none; border-top: 1px solid var(--line); margin: 22px 0; }
 .panel { background: #f5f3ed; border-radius: 10px; padding: 16px; }
 ul { margin: 0; padding: 0; list-style: none; }
 li { padding: 7px 0; border-bottom: 1px solid #ddd8cc; }
-
-.progress { height: 10px; border-radius: 12px; background: #dedbd2; overflow: hidden; margin: 10px 0; }
-.progress div { height:100%; width:100%; background: var(--green); }
 .action-row, .button-row, .refine-row { display:flex; gap: 12px; align-items:center; flex-wrap: wrap; }
 .action-row { justify-content: space-between; }
 .checkbox { font-weight: 500; }
@@ -56,9 +53,43 @@ button:hover { border-color: var(--green); }
 .refine-row input { flex: 1; min-width: 220px; }
 .hidden { display:none; }
 .custom-speed-row { display:flex; align-items:center; gap:8px; margin-top:6px; }
+.custom-speed-row.hidden { display: none; }
 .custom-speed-row input { width: 110px; }
 
+/* ---- Site navigation ---- */
+.site-nav { display:flex; gap: 8px; margin-bottom: 18px; }
+.site-nav a { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line); text-decoration: none; font-size: 13px; font-weight: 600; color: var(--muted); background: var(--card); }
+.site-nav a.nav-active { background: var(--text); color: white; border-color: var(--text); }
+.site-nav a:hover:not(.nav-active) { border-color: var(--green); color: var(--text); }
+.road-note { color: var(--muted); margin: 4px 0 14px; font-weight: 500; font-size: 13px; }
+.field-error { color: #c0392b; }
+.actor-legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 12px 0 4px; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
 /* ---- Variant B (unstructured) ---- */
+
+/* textarea header: label left, example button right */
+.textarea-header { display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 6px; }
+.textarea-header label { margin-bottom: 0; }
+.example-btn { padding: 5px 12px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); cursor: pointer; white-space: nowrap; }
+.example-btn:hover { border-color: var(--green); color: var(--text); }
+
+/* hint chips below textarea */
+.hint-chips { display:flex; flex-wrap:wrap; gap: 6px; margin: 8px 0 4px; }
+.hint-chips span { background: #f0ede6; color: #6b6862; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
+
+/* pipeline running state — amber pulse while backend is working */
+@keyframes pl-pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+.pipeline .running { color: #d4890a; }
+.pipeline .running span { color: #8a5c06; }
+.pipeline .running b { animation: pl-pulse 1.2s ease-in-out infinite; display:inline-block; }
+
+/* sub-label under a pipeline step (e.g. "not used") */
+.pl-note { display:block; font-size: 10px; color: #b7b3aa; font-weight: 500; margin-top: 2px; line-height: 1.2; }
+.pipeline .done .pl-note { color: #55776b; }
+.pipeline .failed .pl-note { color: #c0392b; }
+
 .badges .variant { background: #efece4; color: #6b6862; }
 .scene-text { width: 100%; box-sizing: border-box; min-height: 120px; resize: vertical;
   border: 1px solid #e3e0d8; border-radius: 10px; padding: 14px; font: inherit;

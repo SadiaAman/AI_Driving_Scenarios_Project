@@ -8,7 +8,12 @@
 </head>
 <body>
   <main class="page">
-    <div class="breadcrumb">Presented file ›</div>
+    <div class="breadcrumb">AI Driving Scenarios › New Scenario</div>
+
+    <nav class="site-nav">
+      <a href="index.html" class="nav-active">Variant A — Structured</a>
+      <a href="variant-b.html">Variant B — Unstructured</a>
+    </nav>
 
     <section class="card">
       <div class="header-row">
@@ -24,7 +29,13 @@
             <option value="50">50 km/h</option>
             <option value="80">80 km/h</option>
             <option value="100">100 km/h</option>
+            <option value="custom">Custom speed</option>
           </select>
+          <div id="egoSpeedCustomRow" class="custom-speed-row hidden">
+            <input id="egoSpeedCustom" type="number" min="0" max="130" step="any" placeholder="km/h" disabled />
+            <span>km/h</span>
+          </div>
+          <small id="egoSpeedError" class="field-error hidden"></small>
         </label>
         <label>Number of traffic vehicles
           <select id="trafficVehicles">
@@ -35,8 +46,6 @@
             <option value="3">3</option>
           </select>
         </label>
-      </div>
-      <div class="grid two">
         <label>Time of day
           <select id="timeOfDay">
             <option value="" selected disabled>Select time of day</option>
@@ -44,17 +53,8 @@
             <option value="Night">Night</option>
           </select>
         </label>
-        <label>Number of lanes
-          <select id="laneCount">
-            <option value="" selected disabled>Select number of lanes</option>
-            <option value="2">2</option>
-            <option value="4">4</option>
-            <option value="6">6</option>
-            <option value="8">8</option>
-          </select>
-          <small>Target road width (applied in a later phase).</small>
-        </label>
       </div>
+      <small class="road-note">All scenarios use the fixed fabriksgatan road.</small>
 
       <hr />
       <h2>Scenario builder</h2>
@@ -103,12 +103,13 @@
             <option value="20">20 km/h</option>
             <option value="30">30 km/h</option>
             <option value="50">50 km/h</option>
-            <option value="custom">Custom speed…</option>
+            <option value="custom">Custom speed</option>
           </select>
           <div id="npcSpeedCustomRow" class="custom-speed-row hidden">
-            <input id="npcSpeedCustom" type="number" min="1" max="200" step="1" placeholder="km/h" />
+            <input id="npcSpeedCustom" type="number" min="0" max="130" step="any" placeholder="km/h" disabled />
             <span>km/h</span>
           </div>
+          <small id="npcSpeedError" class="field-error hidden"></small>
           <small>Speed of the main NPC actor.</small>
         </label>
       </div>
@@ -116,17 +117,9 @@
       <label>Generated prompt preview</label>
       <div id="promptPreview" class="prompt-box"></div>
 
-      <div class="grid two status-grid">
-        <div class="panel">
-          <h3>Esmini readiness checklist</h3>
-          <ul id="checklist"></ul>
-        </div>
-        <div class="panel">
-          <h3>Prompt completeness</h3>
-          <div class="progress"><div id="progressBar"></div></div>
-          <strong id="progressText">0%</strong>
-          <p id="progressMessage">Please complete all required fields.</p>
-        </div>
+      <div class="panel status-grid">
+        <h3>Esmini readiness checklist</h3>
+        <ul id="checklist"></ul>
       </div>
 
       <div class="action-row">
@@ -154,6 +147,7 @@
         </div>
         <div class="badges"><span class="valid">Valid</span><span>Latest scenario</span></div>
       </div>
+      <div id="actorLegend" class="actor-legend"></div>
       <pre id="xmlPreview" class="code"></pre>
       <label>Refine with a follow-up prompt</label>
       <div class="refine-row">

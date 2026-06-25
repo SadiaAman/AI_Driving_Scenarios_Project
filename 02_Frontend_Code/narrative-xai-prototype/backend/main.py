@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 import os
 import re
@@ -17,7 +18,6 @@ try:
         environment_action_xml as _sg_environment_action_xml,
         build_entities_xml as _sg_build_entities_xml,
         build_ego_init_xml as _sg_build_ego_init_xml,
-        build_lane_road_xodr as _sg_build_lane_road_xodr,
     )
     _SCENARIOGENERATION_AVAILABLE = True
 except Exception:
@@ -26,7 +26,7 @@ except Exception:
 # Varied colours/models for background traffic (existing VehicleCatalog entries),
 # distinguishable from the white Ego and red NPC. Shared by the manual loop and
 # the scenariogeneration entities builder so both stay in sync.
-TRAFFIC_MODELS = ["car_blue", "car_yellow", "van_red"]
+TRAFFIC_MODELS = ["car_white", "car_white", "car_white"]
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -48,31 +48,15 @@ PROJECT_DIR = BASE_DIR.parents[2]
 ESMINI_DEMO_DIR = PROJECT_DIR / "03_esmini" / "esmini-demo"
 
 
-def resolve_road(data) -> tuple:
+def road_files_for(data=None) -> tuple:
     """
-    Decide which road a scenario uses: a dynamically generated N-lane road when
-    scenariogeneration is available (esmini renders it from the .xodr alone — no
-    scene graph), otherwise the bundled fabriksgatan road. Deterministic (the
-    generated road is cached), so callers stay in sync.
-
-    Returns (logic_file: Path, scene_graph_file: Path|None, is_generated: bool).
+    Every scenario uses one fixed OpenDRIVE road: the bundled fabriksgatan map,
+    with its matching scene graph (.osgb). Returns (logic_file, scene_graph_file).
+    This is what each generated XOSC references and what /download-xodr exports.
     """
-    if _SCENARIOGENERATION_AVAILABLE:
-        try:
-            road = _sg_build_lane_road_xodr(data.laneCount, GENERATED_DIR / "roads")
-            return road, None, True
-        except Exception:
-            pass
     resources = ESMINI_DEMO_DIR / "resources"
     return (resources / "xodr" / "fabriksgatan.xodr",
-            resources / "models" / "fabriksgatan.osgb", False)
-
-
-def road_files_for(data) -> tuple:
-    """(logic_file, scene_graph_file) for the scenario — used to track the road
-    file for /download-xodr. Mirrors resolve_road()."""
-    logic, scene, _ = resolve_road(data)
-    return logic, scene
+            resources / "models" / "fabriksgatan.osgb")
 
 ESMINI_EXE = os.getenv(
     "ESMINI_EXE",
@@ -91,7 +75,7 @@ app.add_middleware(
 
 
 class ScenarioRequest(BaseModel):
-    egoSpeed: int
+    egoSpeed: float
     trafficVehicles: int
     weather: str
     timeOfDay: str
@@ -99,9 +83,6 @@ class ScenarioRequest(BaseModel):
     npcBehavior: str
     egoResponse: str
     prompt: str
-    # Target road width. Recorded as metadata now; the road geometry is applied
-    # in a later phase (it stays the fabriksgatan road for the moment).
-    laneCount: int = 2
     # NPC actor speed in km/h. Recorded/logged now; applied to the NPC's actual
     # movement in a later phase.
     npcSpeed: float = 30.0
@@ -143,10 +124,10 @@ WEATHER_PRESETS = {
     #     the Precipitation element is still emitted for correctness/friction.
     #
     # fractionalCloudCover (OSC 1.2+) replaces the deprecated cloudState attribute.
-    "clear": ("zeroOktas", "dry", "0.0", "100000", "1.0", 100000),
-    "rain": ("eightOktas", "rain", "0.7", "75", "0.7", 22000),
-    "snow": ("eightOktas", "snow", "0.6", "60", "0.5", 45000),
-    "fog": ("fourOktas", "dry", "0.0", "40", "0.8", 18000),
+    "clear": ("zeroOktas",  "dry",  "0.0", "100000", "1.0", 100000),
+    "rain":  ("eightOktas", "rain", "0.7", "800",   "0.7",  40000),
+    "snow":  ("eightOktas", "snow", "0.6", "500",   "0.5",  65000),
+    "fog":   ("zeroOktas",  "dry",  "0.0", "120",   "0.8",  90000),
 }
 
 # NPC type -> how the "main other actor" is represented in the scenario.
@@ -157,7 +138,7 @@ WEATHER_PRESETS = {
 NPC_PRESETS = {
     "pedestrian": {"kind": "crosser", "catalog": None, "speed": 1.5},
     "cyclist": {"kind": "crosser", "catalog": "bicycle", "speed": 3.0},
-    "car": {"kind": "vehicle", "catalog": "car_red", "speed_factor": 0.5},
+    "car": {"kind": "vehicle", "catalog": "car_yellow", "speed_factor": 0.5},
     "truck": {"kind": "vehicle", "catalog": "truck_yellow", "speed_factor": 0.5},
 }
 
@@ -312,256 +293,13 @@ def build_ego_init_block(host_speed_ms: float) -> str:
     return _manual_ego_init(host_speed_ms)
 
 
-def build_generated_road_xosc(data: ScenarioRequest, logic_path) -> str:
-    """
-    Phase 4: build the scenario on a dynamically generated N-lane straight road
-    (road id 0; ego-direction lanes -1..-per_side, oncoming lanes +1..+per_side).
-    Placement is road-agnostic lane coordinates (no route catalog, no sidewalk
-    crossing). esmini renders the road from the .xodr alone (no SceneGraphFile).
-    """
-    host_speed_ms = round(data.egoSpeed / 3.6, 2)
-    npc_speed_ms = round(data.npcSpeed / 3.6, 2)
-    improve = data.improve
-
-    environment_action = build_environment_action(*get_environment(data))
-
-    resources_dir = (ESMINI_DEMO_DIR / "resources").as_posix()
-    vehicle_catalog_dir = f"{resources_dir}/xosc/Catalogs/Vehicles"
-    pedestrian_model = f"{resources_dir}/models/walkman.osgb"
-    logic_file = logic_path.as_posix()
-
-    npc = NPC_PRESETS.get(data.npcType, NPC_PRESETS["pedestrian"])
-    num_traffic = min(max(data.trafficVehicles, 0), 3)
-    entities_block = _sg_build_entities_xml(
-        npc.get("catalog"), pedestrian_model, TRAFFIC_MODELS, num_traffic
-    )
-
-    per_side = max(1, data.laneCount // 2)
-    can_change = per_side >= 2  # an adjacent same-direction lane exists for changes
-
-    # ---- Ego: lane -1, s=20; drives the straight road (no route needed). ----
-    ego_init = f'''
-            <Private entityRef="Ego">
-               <PrivateAction><TeleportAction><Position>
-                  <LanePosition roadId="0" laneId="-1" s="20" offset="0.0"/>
-               </Position></TeleportAction></PrivateAction>
-               <PrivateAction><LongitudinalAction><SpeedAction>
-                  <SpeedActionDynamics dynamicsShape="step" value="0.0" dynamicsDimension="time"/>
-                  <SpeedActionTarget><AbsoluteTargetSpeed value="{host_speed_ms}"/></SpeedActionTarget>
-               </SpeedAction></LongitudinalAction></PrivateAction>
-            </Private>'''
-
-    # ---- NPC: crosser walks/rides across the road; vehicle is a lead car. ----
-    if npc["kind"] == "crosser":
-        npc_init = f'''
-            <Private entityRef="NPC">
-               <PrivateAction><TeleportAction><Position>
-                  <LanePosition roadId="0" laneId="{per_side}" s="75" offset="0.0"/>
-               </Position></TeleportAction></PrivateAction>
-            </Private>'''
-        cross_trigger = _ego_traveled_trigger("npc_cross_condition", 5)
-        npc_maneuver_group = f'''
-            <ManeuverGroup maximumExecutionCount="1" name="npc_group">
-               <Actors selectTriggeringEntities="false"><EntityRef entityRef="NPC"/></Actors>
-               <Maneuver name="npc_maneuver">
-                  <Event maximumExecutionCount="1" name="npc_event" priority="overwrite">
-                     <Action name="npc_cross_speed"><PrivateAction><LongitudinalAction><SpeedAction>
-                        <SpeedActionDynamics dynamicsShape="linear" value="2" dynamicsDimension="rate"/>
-                        <SpeedActionTarget><AbsoluteTargetSpeed value="{npc_speed_ms}"/></SpeedActionTarget>
-                     </SpeedAction></LongitudinalAction></PrivateAction></Action>
-                     <Action name="npc_cross_route"><PrivateAction><RoutingAction><FollowTrajectoryAction>
-                        <Trajectory closed="false" name="npc_cross_trajectory"><ParameterDeclarations/><Shape><Polyline>
-                           <Vertex><Position><LanePosition roadId="0" laneId="{per_side}" s="75" offset="0.0"/></Position></Vertex>
-                           <Vertex><Position><LanePosition roadId="0" laneId="-{per_side}" s="75" offset="0.0"/></Position></Vertex>
-                        </Polyline></Shape></Trajectory>
-                        <TimeReference><None/></TimeReference>
-                        <TrajectoryFollowingMode followingMode="follow"/>
-                     </FollowTrajectoryAction></RoutingAction></PrivateAction></Action>
-                     {cross_trigger}
-                  </Event>
-               </Maneuver>
-            </ManeuverGroup>'''
-    else:
-        start_lane = "-2" if (data.npcBehavior == "cuts in front of ego" and can_change) else "-1"
-        npc_init = f'''
-            <Private entityRef="NPC">
-               <PrivateAction><TeleportAction><Position>
-                  <LanePosition roadId="0" laneId="{start_lane}" s="70" offset="0.0"/>
-               </Position></TeleportAction></PrivateAction>
-               <PrivateAction><LongitudinalAction><SpeedAction>
-                  <SpeedActionDynamics dynamicsShape="step" value="0.0" dynamicsDimension="time"/>
-                  <SpeedActionTarget><AbsoluteTargetSpeed value="{max(npc_speed_ms, 0.5)}"/></SpeedActionTarget>
-               </SpeedAction></LongitudinalAction></PrivateAction>
-            </Private>'''
-        if data.npcBehavior == "changes lane suddenly" and can_change:
-            t = "1.2" if improve else "2"
-            action_body = f'''<PrivateAction><LateralAction><LaneChangeAction>
-                  <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="{t}" dynamicsDimension="time"/>
-                  <LaneChangeTarget><RelativeTargetLane entityRef="NPC" value="-1"/></LaneChangeTarget>
-               </LaneChangeAction></LateralAction></PrivateAction>'''
-        elif data.npcBehavior == "cuts in front of ego" and can_change:
-            t = "1.0" if improve else "1.5"
-            action_body = f'''<PrivateAction><LateralAction><LaneChangeAction>
-                  <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="{t}" dynamicsDimension="time"/>
-                  <LaneChangeTarget><RelativeTargetLane entityRef="NPC" value="1"/></LaneChangeTarget>
-               </LaneChangeAction></LateralAction></PrivateAction>'''
-        else:  # brakes suddenly (and any behaviour that can't lane-change on this road)
-            rate = "-9" if improve else "-6"
-            action_body = f'''<PrivateAction><LongitudinalAction><SpeedAction>
-                  <SpeedActionDynamics dynamicsShape="linear" value="{rate}" dynamicsDimension="rate"/>
-                  <SpeedActionTarget><AbsoluteTargetSpeed value="0"/></SpeedActionTarget>
-               </SpeedAction></LongitudinalAction></PrivateAction>'''
-        npc_trigger = _ego_traveled_trigger("npc_behaviour_condition", 6 if improve else 8)
-        npc_maneuver_group = f'''
-            <ManeuverGroup maximumExecutionCount="1" name="npc_group">
-               <Actors selectTriggeringEntities="false"><EntityRef entityRef="NPC"/></Actors>
-               <Maneuver name="npc_maneuver">
-                  <Event maximumExecutionCount="1" name="npc_event" priority="overwrite">
-                     <Action name="npc_behaviour_action">{action_body}</Action>
-                     {npc_trigger}
-                  </Event>
-               </Maneuver>
-            </ManeuverGroup>'''
-
-    # ---- Ego response (steer only where an adjacent lane exists, else slow). ----
-    er = data.egoResponse
-    if er == "steers to avoid" and not can_change:
-        er = "slows down"
-    if er == "brakes immediately":
-        rate = "-10" if improve else "-8"
-        ego_actions = f'''<Action name="ego_response_action"><PrivateAction><LongitudinalAction><SpeedAction>
-              <SpeedActionDynamics dynamicsShape="linear" value="{rate}" dynamicsDimension="rate"/>
-              <SpeedActionTarget><AbsoluteTargetSpeed value="0"/></SpeedActionTarget>
-           </SpeedAction></LongitudinalAction></PrivateAction></Action>'''
-    elif er == "steers to avoid":
-        steer_time = "1.2" if improve else "2"
-        slow_rate = "-5" if improve else "-3"
-        target = round(host_speed_ms * (0.4 if improve else 0.6), 2)
-        ego_actions = f'''<Action name="ego_response_steer"><PrivateAction><LateralAction><LaneChangeAction>
-              <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="{steer_time}" dynamicsDimension="time"/>
-              <LaneChangeTarget><RelativeTargetLane entityRef="Ego" value="-1"/></LaneChangeTarget>
-           </LaneChangeAction></LateralAction></PrivateAction></Action>
-           <Action name="ego_response_slow"><PrivateAction><LongitudinalAction><SpeedAction>
-              <SpeedActionDynamics dynamicsShape="linear" value="{slow_rate}" dynamicsDimension="rate"/>
-              <SpeedActionTarget><AbsoluteTargetSpeed value="{target}"/></SpeedActionTarget>
-           </SpeedAction></LongitudinalAction></PrivateAction></Action>'''
-    else:
-        if er == "slows down":
-            rate, factor = ("-5", 0.3) if improve else ("-3", 0.4)
-        else:  # keeps lane and reduces speed
-            rate, factor = ("-6", 0.35) if improve else ("-4", 0.5)
-        target = round(host_speed_ms * factor, 2)
-        ego_actions = f'''<Action name="ego_response_action"><PrivateAction><LongitudinalAction><SpeedAction>
-              <SpeedActionDynamics dynamicsShape="linear" value="{rate}" dynamicsDimension="rate"/>
-              <SpeedActionTarget><AbsoluteTargetSpeed value="{target}"/></SpeedActionTarget>
-           </SpeedAction></LongitudinalAction></PrivateAction></Action>'''
-    trigger_distance = min(round((host_speed_ms ** 2 / 16 + 8) * (1.3 if improve else 1.0), 1), 40.0)
-    ego_response_group = f'''
-            <ManeuverGroup maximumExecutionCount="1" name="ego_response_group">
-               <Actors selectTriggeringEntities="false"><EntityRef entityRef="Ego"/></Actors>
-               <Maneuver name="ego_response_maneuver">
-                  <Event name="ego_response_event" priority="overwrite">
-                     {ego_actions}
-                     <StartTrigger><ConditionGroup>
-                        <Condition name="ego_response_condition" delay="0" conditionEdge="none">
-                           <ByEntityCondition>
-                              <TriggeringEntities triggeringEntitiesRule="any"><EntityRef entityRef="Ego"/></TriggeringEntities>
-                              <EntityCondition>
-                                 <RelativeDistanceCondition entityRef="NPC" value="{trigger_distance}" freespace="true" coordinateSystem="entity" relativeDistanceType="longitudinal" rule="lessThan"/>
-                              </EntityCondition>
-                           </ByEntityCondition>
-                        </Condition>
-                     </ConditionGroup></StartTrigger>
-                  </Event>
-               </Maneuver>
-            </ManeuverGroup>'''
-
-    # ---- Background traffic on oncoming lane +1, spaced ahead. ----
-    traffic_init = ""
-    for i in range(num_traffic):
-        name = f"TrafficVehicle_{i + 1}"
-        s_pos = 40 + i * 20
-        traffic_init += f'''
-            <Private entityRef="{name}">
-               <PrivateAction><TeleportAction><Position>
-                  <LanePosition roadId="0" laneId="1" s="{s_pos}" offset="0.0"/>
-               </Position></TeleportAction></PrivateAction>
-               <PrivateAction><LongitudinalAction><SpeedAction>
-                  <SpeedActionDynamics dynamicsShape="step" value="0.0" dynamicsDimension="time"/>
-                  <SpeedActionTarget><AbsoluteTargetSpeed value="4.0"/></SpeedActionTarget>
-               </SpeedAction></LongitudinalAction></PrivateAction>
-            </Private>'''
-
-    headlight_entities = ["Ego"]
-    if npc["kind"] == "vehicle":
-        headlight_entities.append("NPC")
-    headlight_entities += [f"TrafficVehicle_{i + 1}" for i in range(num_traffic)]
-    headlight_group = build_headlights(data, headlight_entities)
-
-    return f'''<?xml version="1.0" encoding="UTF-8"?>
-<OpenSCENARIO>
-   <FileHeader revMajor="1" revMinor="2" date="2026-06-07T00:00:00"
-               description="Narrative XAI generated driving scenario ({data.laneCount}-lane generated road)"
-               author="Sadia Aman"/>
-   <ParameterDeclarations>
-      <ParameterDeclaration name="HostVehicle" parameterType="string" value="car_white"/>
-      <ParameterDeclaration name="HostSpeed" parameterType="double" value="{host_speed_ms}"/>
-      <ParameterDeclaration name="WeatherCondition" parameterType="string" value="{data.weather}"/>
-      <ParameterDeclaration name="NPCType" parameterType="string" value="{data.npcType}"/>
-      <ParameterDeclaration name="NPCBehaviour" parameterType="string" value="{data.npcBehavior}"/>
-      <ParameterDeclaration name="EgoResponse" parameterType="string" value="{data.egoResponse}"/>
-      <ParameterDeclaration name="Improved" parameterType="boolean" value="{str(data.improve).lower()}"/>
-      <ParameterDeclaration name="LaneCount" parameterType="integer" value="{data.laneCount}"/>
-      <ParameterDeclaration name="NpcSpeed" parameterType="double" value="{npc_speed_ms}"/>
-   </ParameterDeclarations>
-   <CatalogLocations>
-      <VehicleCatalog><Directory path="{vehicle_catalog_dir}"/></VehicleCatalog>
-   </CatalogLocations>
-   <RoadNetwork>
-      <LogicFile filepath="{logic_file}"/>
-   </RoadNetwork>
-   {entities_block}
-   <Storyboard>
-      <Init>
-         <Actions>
-            {environment_action}{ego_init}{npc_init}{traffic_init}
-         </Actions>
-      </Init>
-      <Story name="GeneratedScenarioStory">
-         <Act name="GeneratedScenarioAct">{npc_maneuver_group}{ego_response_group}{headlight_group}
-            <StartTrigger><ConditionGroup>
-               <Condition name="ActStartCondition" delay="0" conditionEdge="none">
-                  <ByValueCondition><SimulationTimeCondition value="0" rule="greaterThan"/></ByValueCondition>
-               </Condition>
-            </ConditionGroup></StartTrigger>
-         </Act>
-      </Story>
-      <StopTrigger><ConditionGroup>
-         <Condition name="QuitCondition" delay="0" conditionEdge="rising">
-            <ByValueCondition><SimulationTimeCondition value="20" rule="greaterThan"/></ByValueCondition>
-         </Condition>
-      </ConditionGroup></StopTrigger>
-   </Storyboard>
-</OpenSCENARIO>'''
-
-
 def build_xosc_preview(data: ScenarioRequest) -> str:
     """
     Generate an esmini-compatible OpenSCENARIO file.
 
-    Phase 4: when scenariogeneration is available, the scenario is built on a
-    dynamically generated N-lane road (build_generated_road_xosc). If that path
-    is unavailable or fails, it falls back to the proven fabriksgatan generator
-    below — so generation never breaks.
+    Every scenario is built on the fixed fabriksgatan road (its <LogicFile> is
+    fabriksgatan.xodr), so all generated scenarios share one OpenDRIVE map.
     """
-    logic_path, scene_path, is_generated = resolve_road(data)
-    if is_generated:
-        try:
-            return build_generated_road_xosc(data, logic_path)
-        except Exception:
-            pass  # fall back to the fabriksgatan generator below
-
-    # ---- Fallback: the proven fabriksgatan scenario ----
     # esmini expects speed in m/s. Convert ego speed from km/h to m/s.
     host_speed_ms = round(data.egoSpeed / 3.6, 2)
     npc_speed_ms = round(data.npcSpeed / 3.6, 2)
@@ -666,7 +404,7 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
                author="Sadia Aman"/>
 
    <ParameterDeclarations>
-      <ParameterDeclaration name="HostVehicle" parameterType="string" value="car_white"/>
+      <ParameterDeclaration name="HostVehicle" parameterType="string" value="car_blue"/>
       <ParameterDeclaration name="HostSpeed" parameterType="double" value="{host_speed_ms}"/>
       <ParameterDeclaration name="PedestrianSpeed" parameterType="double" value="1.5"/>
       <ParameterDeclaration name="WeatherCondition" parameterType="string" value="{data.weather}"/>
@@ -674,7 +412,6 @@ def build_xosc_preview(data: ScenarioRequest) -> str:
       <ParameterDeclaration name="NPCBehaviour" parameterType="string" value="{data.npcBehavior}"/>
       <ParameterDeclaration name="EgoResponse" parameterType="string" value="{data.egoResponse}"/>
       <ParameterDeclaration name="Improved" parameterType="boolean" value="{str(data.improve).lower()}"/>
-      <ParameterDeclaration name="LaneCount" parameterType="integer" value="{data.laneCount}"/>
       <ParameterDeclaration name="NpcSpeed" parameterType="double" value="{npc_speed_ms}"/>
    </ParameterDeclarations>
 
@@ -1150,7 +887,9 @@ def build_scenario_filename(data: ScenarioRequest) -> str:
 
     next_index = max_index + 1
     safe_weather = data.weather.replace(" ", "_")
-    return f"scenario_{next_index:03d}_{data.egoSpeed}kmh_{data.trafficVehicles}traffic_{safe_weather}.xosc"
+    improved_tag = "_improved" if data.improve else ""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"scenario_{next_index:03d}_{data.egoSpeed}kmh_{data.trafficVehicles}traffic_{safe_weather}{improved_tag}_{timestamp}.xosc"
 
 
 def get_current_xosc_path() -> Path | None:
@@ -1189,9 +928,10 @@ def generate_and_save(data: ScenarioRequest) -> dict:
         "actors": actual_actor_count,
         "duration": 14.2,
         "improved": data.improve,
-        "laneCount": data.laneCount,
         "npcSpeed": data.npcSpeed,
         "npcSpeedMs": round(data.npcSpeed / 3.6, 2),
+        "npcType": data.npcType,
+        "trafficVehicles": num_traffic_vehicles,
         "xosc_preview": xosc,
     }
 
@@ -1204,7 +944,7 @@ def generate_scenario(data: ScenarioRequest):
     pipeline_log = [
         f"› Parsing prompt: \"{data.prompt[:80]}...\"",
         "› Sending structured prompt to generator...",
-        f"› Road: {data.laneCount}-lane (road geometry applied in a later phase).",
+        "› Road: fixed fabriksgatan map (fabriksgatan.xodr).",
         f"› NPC speed: {data.npcSpeed} km/h ({npc_speed_ms} m/s) — recorded; applied to NPC movement in a later phase.",
         "› trafficVehicles received; vehicle generation is currently prototype-only and may not produce full XOSC traffic behavior.",
         f"✓ XOSC generated — {result['actors']} actors, 14.2 s duration",
@@ -1224,9 +964,11 @@ def generate_scenario(data: ScenarioRequest):
 
 
 # ---------------------------------------------------------------------------
-# Variant B (unstructured): rule-based natural-language scenario parser.
-# Produces the SAME ScenarioRequest the structured form does, so both variants
-# share generate_and_save / build_xosc_preview. No LLM here (Gemini comes later).
+# Variant B (unstructured): natural-language scenario parser.
+# /generate-from-text tries the Gemini LLM parser (llm_parse.py) first and
+# falls back to this rule-based parser when Gemini is unavailable or errors.
+# Both paths produce the same ScenarioRequest, so generate_and_save /
+# build_xosc_preview are shared by both variants unchanged.
 # ---------------------------------------------------------------------------
 _UNSUPPORTED_ACTORS = ("dog", "cat", "deer", "horse", "moose", "cow", "bird", "animal")
 
@@ -1277,16 +1019,8 @@ def parse_scenario_text(text: str):
     if "snow" in t:
         weather = "snow"
 
-    # Lane count / road type (an explicit "N-lane" wins; else road-type keyword,
-    # preferring the ego's main road type, e.g. highway, over "side road").
-    lane_count = None
-    lm = re.search(r"(\d)\s*[- ]?lane", t)
-    if lm:
-        lane_count = min((2, 4, 6, 8), key=lambda p: abs(p - int(lm.group(1))))
-    elif any(w in t for w in ("highway", "motorway", "freeway")):
-        lane_count = 4
-    elif any(w in t for w in ("two-lane", "two lane", "single", "side road", "residential")):
-        lane_count = 2
+    # Road type / lane count is no longer parsed — every scenario uses the fixed
+    # fabriksgatan road, so users don't need to mention road width.
 
     # Traffic vehicles.
     traffic = None
@@ -1371,7 +1105,6 @@ def parse_scenario_text(text: str):
     parsed = {
         "egoSpeed": ego_speed,
         "trafficVehicles": traffic if traffic is not None else 0,
-        "laneCount": lane_count or 2,
         "timeOfDay": time_of_day or "Day",
         "weather": weather or "clear",
         "npcType": npc_type,
@@ -1392,7 +1125,6 @@ def parse_scenario_text(text: str):
         npcBehavior=npc_behavior,
         egoResponse=ego_response,
         prompt=text,
-        laneCount=parsed["laneCount"],
         npcSpeed=parsed["npcSpeed"],
     )
     return data, parsed, []
@@ -1400,16 +1132,42 @@ def parse_scenario_text(text: str):
 
 @app.post("/generate-from-text")
 def generate_from_text(req: TextScenarioRequest):
-    data, parsed, messages = parse_scenario_text(req.text)
     snippet = (req.text or "").strip()[:80]
+    data = None
+    parsed: dict = {}
+    messages: list = []
+    parser_used = "rule-based"
+
+    # Try Gemini LLM parser first; fall back to rule-based on any technical failure.
+    try:
+        from llm_parse import llm_parse_scenario, LLM_AVAILABLE
+        if LLM_AVAILABLE:
+            request_kwargs, llm_parsed, llm_messages = llm_parse_scenario(req.text)
+            if llm_parsed is not None:
+                # Gemini ran (success or validation failure) — use its output.
+                parser_used = "gemini"
+                parsed = llm_parsed
+                messages = llm_messages or []
+                if request_kwargs is not None:
+                    data = ScenarioRequest(**request_kwargs)
+    except Exception:
+        pass  # import error or unexpected issue — fall through to rule-based
+
+    # Rule-based fallback: used when Gemini was unavailable or had a technical error.
+    if parser_used == "rule-based":
+        data, parsed, messages = parse_scenario_text(req.text)
+
+    parser_label = "Gemini LLM" if parser_used == "gemini" else "rule-based parser"
 
     if data is None:
         return {
             "ok": False,
             "parsed": parsed,
             "messages": messages,
+            "parserUsed": parser_used,
             "pipeline_log": [
                 f'› Parsing description: "{snippet}..."',
+                f"  (using {parser_label})",
                 "✗ Prompt parsing failed — clarification needed:",
                 *[f"  • {m}" for m in messages],
             ],
@@ -1418,12 +1176,12 @@ def generate_from_text(req: TextScenarioRequest):
     result = generate_and_save(data)
     result["ok"] = True
     result["parsed"] = parsed
+    result["parserUsed"] = parser_used
     result["pipeline_log"] = [
         f'› Parsing description: "{snippet}..."',
-        "✓ Prompt parsed — see parsed parameters below.",
-        f"✓ XOSC generated — {result['actors']} actors on a {data.laneCount}-lane road.",
+        f"✓ Prompt parsed using {parser_label} — see parsed parameters below.",
+        f"✓ XOSC generated — {result['actors']} actors on the fabriksgatan road.",
         "› Esmini validation — runs when you click Run in esmini.",
-        "› LLM refinement — not used in this step (current development version uses a rule-based parser).",
         "✓ Scenario ready for export.",
     ]
     return result

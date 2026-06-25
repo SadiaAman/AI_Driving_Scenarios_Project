@@ -8,22 +8,36 @@ let latestFilename = null;
 const PIPELINE_STEPS = ["pl-parse", "pl-generate", "pl-validate", "pl-refine", "pl-export"];
 
 function setPipelineStep(id, state) {
-  // state: "pending" | "done" | "failed"
+  // state: "pending" | "running" | "done" | "failed"
   const el = document.getElementById(id);
   if (!el) return;
-  el.classList.remove("pending", "done", "failed");
+  el.classList.remove("pending", "running", "done", "failed");
   el.classList.add(state);
-  el.querySelector("b").textContent = state === "done" ? "✓" : state === "failed" ? "✗" : "○";
+  el.querySelector("b").textContent =
+    state === "done" ? "✓" : state === "failed" ? "✗" : state === "running" ? "◉" : "○";
 }
 function resetPipeline() {
   PIPELINE_STEPS.forEach(id => setPipelineStep(id, "pending"));
+  document.getElementById("parsedPanel").classList.add("hidden");
+  const llmNote = document.querySelector("#pl-refine .pl-note");
+  if (llmNote) llmNote.textContent = "not used";
+}
+
+function setLlmParseStep(parserUsed, success) {
+  const llmNote = document.querySelector("#pl-refine .pl-note");
+  if (parserUsed === "gemini") {
+    setPipelineStep("pl-refine", success ? "done" : "failed");
+    if (llmNote) llmNote.textContent = "via Gemini";
+  } else {
+    // Rule-based: the LLM parsing step was not exercised — leave pending.
+    if (llmNote) llmNote.textContent = "rule-based";
+  }
 }
 
 // ---- Parsed-parameter preview ----
 const PARSED_FIELDS = [
   ["egoSpeed", "Ego speed (km/h)"],
   ["trafficVehicles", "Traffic vehicles"],
-  ["laneCount", "Number of lanes"],
   ["timeOfDay", "Time of day"],
   ["weather", "Weather"],
   ["npcType", "NPC / actor type"],
@@ -42,7 +56,7 @@ function renderParsed(parsed) {
 }
 
 function promptFromParsed(p) {
-  return `The ego vehicle is travelling at ${p.egoSpeed} km/h on a ${p.laneCount}-lane road `
+  return `The ego vehicle is travelling at ${p.egoSpeed} km/h `
     + `in ${p.weather} conditions during ${String(p.timeOfDay).toLowerCase()}. `
     + `A ${p.npcType} travelling at ${p.npcSpeed} km/h ${p.npcBehavior}. `
     + `The ego vehicle ${p.egoResponse}.`;
@@ -59,10 +73,13 @@ async function generateFromText() {
   const text = document.getElementById("sceneText").value.trim();
   document.getElementById("clarifyBox").classList.add("hidden");
   if (!text) {
-    return alert("Describe the scenario first.");
+    document.getElementById("logBox").textContent = "✗ Please describe the scenario before generating.";
+    return;
   }
 
   resetPipeline();
+  setPipelineStep("pl-parse", "running");
+  document.getElementById("resultCard").classList.add("hidden");
   document.getElementById("logBox").textContent = "› Parsing your description...";
 
   try {
@@ -75,12 +92,15 @@ async function generateFromText() {
 
     document.getElementById("logBox").textContent = (result.pipeline_log || []).join("\n");
 
+    // Always show parsed params after any attempt (success or failure).
+    renderParsed(result.parsed);
+    document.getElementById("parsedPanel").classList.remove("hidden");
+
     if (!result.ok) {
-      // Parsing failed — show the parsed preview + clarifications, generate nothing.
+      // Parsing failed — show clarifications, leave result card hidden.
       setPipelineStep("pl-parse", "failed");
-      renderParsed(result.parsed);
+      setLlmParseStep(result.parserUsed || "rule-based", false);
       showClarifications(result.messages || ["Could not understand the description."]);
-      document.getElementById("resultCard").classList.add("hidden");
       return;
     }
 
@@ -88,9 +108,9 @@ async function generateFromText() {
     setPipelineStep("pl-parse", "done");
     setPipelineStep("pl-generate", "done");
     setPipelineStep("pl-export", "done");
-    // pl-validate stays pending until Run; pl-refine stays pending (not used here).
+    setLlmParseStep(result.parserUsed || "rule-based", true);
+    // pl-validate stays pending until Run in esmini.
 
-    renderParsed(result.parsed);
     document.getElementById("promptPreview").textContent = promptFromParsed(result.parsed);
     document.getElementById("xmlPreview").textContent = result.xosc_preview;
 
@@ -99,7 +119,7 @@ async function generateFromText() {
     fileLink.textContent = latestFilename;
     fileLink.href = `${API_BASE}/download-xosc`;
     document.getElementById("fileMeta").textContent =
-      `Generated just now · ${result.actors} actors · ${result.npcSpeed} km/h NPC · ${result.laneCount}-lane road`;
+      `Generated just now · ${result.actors} actors · ${result.npcSpeed} km/h NPC · fabriksgatan road`;
 
     const card = document.getElementById("resultCard");
     card.classList.remove("hidden");
@@ -112,6 +132,12 @@ async function generateFromText() {
 }
 
 document.getElementById("generateBtn").addEventListener("click", generateFromText);
+
+document.getElementById("exampleBtn").addEventListener("click", () => {
+  document.getElementById("sceneText").value =
+    "The ego vehicle is travelling at 50 km/h during day. A pedestrian crosses the road, and the ego vehicle brakes immediately.";
+  document.getElementById("sceneText").focus();
+});
 
 document.getElementById("runBtn").addEventListener("click", async () => {
   document.getElementById("logBox").textContent += `\n› Starting esmini with ${latestFilename || "the latest scenario"}...`;
