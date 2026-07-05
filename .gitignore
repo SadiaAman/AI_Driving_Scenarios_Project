@@ -38,3 +38,9 @@ Thumbs.db
 02_Frontend_Code/narrative-xai-prototype/backend/*.log
 *.log
 log.txt
+
+# Per-variant generated scenarios and recorded videos (runtime + study output)
+02_Frontend_Code/narrative-xai-prototype/backend/Structured XOSC generated/
+02_Frontend_Code/narrative-xai-prototype/backend/Unstructured XOSC generated/
+02_Frontend_Code/narrative-xai-prototype/backend/Structured Output Videos/
+02_Frontend_Code/narrative-xai-prototype/backend/Unstructured Output Videos/

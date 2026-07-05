@@ -219,7 +219,7 @@ function renderScenarioResult(result) {
   const fileLink = document.getElementById("fileLink");
   latestFilename = result.filename;
   fileLink.textContent = latestFilename;
-  fileLink.href = `${API_BASE}/download-xosc`;
+  fileLink.href = `${API_BASE}/download-xosc?variant=structured`;
   document.getElementById("fileMeta").textContent = `Generated just now · ${result.actors} actors · ${result.duration}s duration${result.improved ? " · ★ improved behavior" : ""}`;
   document.getElementById("xmlPreview").textContent = result.xosc_preview;
   renderActorLegend(result);
@@ -283,7 +283,7 @@ document.getElementById("runBtn").addEventListener("click", async () => {
   document.getElementById("logBox").textContent += `\n› Starting esmini with ${filenameMessage}...`;
 
   try {
-    const res = await fetch(`${API_BASE}/run-esmini`, { method: "POST" });
+    const res = await fetch(`${API_BASE}/run-esmini?variant=structured`, { method: "POST" });
     const result = await res.json();
     document.getElementById("logBox").textContent += `\n${result.message}`;
     if (res.ok) setPipelineStep("pl-validate", true);  // validated by running in esmini
@@ -292,8 +292,45 @@ document.getElementById("runBtn").addEventListener("click", async () => {
   }
 });
 
+// Run the scenario in esmini AND capture its window to an MP4 (structured folder).
+// Keep the esmini window visible on-screen during recording.
+document.getElementById("recordBtn").addEventListener("click", async () => {
+  if (!latestFilename) {
+    alert("Generate a scenario first, then Run and record video.");
+    return;
+  }
+  const recordBtn = document.getElementById("recordBtn");
+  const original = recordBtn.textContent;
+  recordBtn.disabled = true;
+  recordBtn.textContent = "Recording scenario…";
+  document.getElementById("downloadVideoBtn").classList.add("hidden");
+  document.getElementById("logBox").textContent +=
+    `\n› Recording ${latestFilename} in esmini… keep the esmini window visible and on top.`;
+  try {
+    const res = await fetch(`${API_BASE}/record-esmini`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ variant: "structured", filename: latestFilename })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.detail || "Recording failed");
+    document.getElementById("logBox").textContent += `\n✓ Video saved: ${result.videoFilename}`;
+    const dl = document.getElementById("downloadVideoBtn");
+    dl.classList.remove("hidden");
+    dl.onclick = () => window.open(
+      `${API_BASE}/download-video?variant=structured&filename=${encodeURIComponent(result.videoFilename)}`,
+      "_blank"
+    );
+  } catch (err) {
+    document.getElementById("logBox").textContent += `\n✗ Video recording failed: ${err.message}`;
+  } finally {
+    recordBtn.disabled = false;
+    recordBtn.textContent = original;
+  }
+});
+
 document.getElementById("exportBtn").addEventListener("click", () => {
-  window.open(`${API_BASE}/download-xosc`, "_blank");
+  window.open(`${API_BASE}/download-xosc?variant=structured`, "_blank");
 });
 
 document.getElementById("exportXodrBtn").addEventListener("click", () => {
@@ -379,7 +416,7 @@ function renderCompare() {
 
 document.getElementById("compareBtn").addEventListener("click", async () => {
   try {
-    const res = await fetch(`${API_BASE}/list-scenarios`);
+    const res = await fetch(`${API_BASE}/list-scenarios?variant=structured`);
     const data = await res.json();
     compareScenarios = data.scenarios || [];
 

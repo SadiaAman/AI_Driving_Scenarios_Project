@@ -117,7 +117,7 @@ async function generateFromText() {
     latestFilename = result.filename;
     const fileLink = document.getElementById("fileLink");
     fileLink.textContent = latestFilename;
-    fileLink.href = `${API_BASE}/download-xosc`;
+    fileLink.href = `${API_BASE}/download-xosc?variant=unstructured`;
     document.getElementById("fileMeta").textContent =
       `Generated just now · ${result.actors} actors · ${result.npcSpeed} km/h NPC · fabriksgatan road`;
 
@@ -142,7 +142,7 @@ document.getElementById("exampleBtn").addEventListener("click", () => {
 document.getElementById("runBtn").addEventListener("click", async () => {
   document.getElementById("logBox").textContent += `\n› Starting esmini with ${latestFilename || "the latest scenario"}...`;
   try {
-    const res = await fetch(`${API_BASE}/run-esmini`, { method: "POST" });
+    const res = await fetch(`${API_BASE}/run-esmini?variant=unstructured`, { method: "POST" });
     const result = await res.json();
     document.getElementById("logBox").textContent += `\n${result.message}`;
     if (res.ok) setPipelineStep("pl-validate", "done");
@@ -151,8 +151,45 @@ document.getElementById("runBtn").addEventListener("click", async () => {
   }
 });
 
+// Run in esmini AND capture its window to an MP4 (unstructured folder).
+// Keep the esmini window visible on-screen during recording.
+document.getElementById("recordBtn").addEventListener("click", async () => {
+  if (!latestFilename) {
+    alert("Generate a scenario first, then Run and record video.");
+    return;
+  }
+  const recordBtn = document.getElementById("recordBtn");
+  const original = recordBtn.textContent;
+  recordBtn.disabled = true;
+  recordBtn.textContent = "Recording scenario…";
+  document.getElementById("downloadVideoBtn").classList.add("hidden");
+  document.getElementById("logBox").textContent +=
+    `\n› Recording ${latestFilename} in esmini… keep the esmini window visible and on top.`;
+  try {
+    const res = await fetch(`${API_BASE}/record-esmini`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ variant: "unstructured", filename: latestFilename })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.detail || "Recording failed");
+    document.getElementById("logBox").textContent += `\n✓ Video saved: ${result.videoFilename}`;
+    const dl = document.getElementById("downloadVideoBtn");
+    dl.classList.remove("hidden");
+    dl.onclick = () => window.open(
+      `${API_BASE}/download-video?variant=unstructured&filename=${encodeURIComponent(result.videoFilename)}`,
+      "_blank"
+    );
+  } catch (err) {
+    document.getElementById("logBox").textContent += `\n✗ Video recording failed: ${err.message}`;
+  } finally {
+    recordBtn.disabled = false;
+    recordBtn.textContent = original;
+  }
+});
+
 document.getElementById("exportBtn").addEventListener("click", () => {
-  window.open(`${API_BASE}/download-xosc`, "_blank");
+  window.open(`${API_BASE}/download-xosc?variant=unstructured`, "_blank");
 });
 document.getElementById("exportXodrBtn").addEventListener("click", () => {
   window.open(`${API_BASE}/download-xodr`, "_blank");

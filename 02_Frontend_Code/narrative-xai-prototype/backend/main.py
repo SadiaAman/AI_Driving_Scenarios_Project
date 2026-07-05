@@ -2,9 +2,11 @@ from datetime import datetime
 from pathlib import Path
 import os
 import re
+import shutil
 import subprocess
+import time
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -39,10 +41,54 @@ try:
 except Exception:
     pass
 
+# Legacy folder (kept for historical files only — never written to or read by the
+# new per-variant logic). New scenarios go into the two variant folders below.
 GENERATED_DIR = BASE_DIR / "generated"
 GENERATED_DIR.mkdir(exist_ok=True)
-LATEST_XOSC_PATH = None
+
+# Per-variant output folders. Variant A (structured form) and Variant B
+# (unstructured natural language) keep their generated XOSC files completely
+# separate so each has its own sequence numbering and latest-file pointer.
+# Names contain spaces — always built with pathlib, never string-concatenated.
+STRUCTURED_GENERATED_DIR = BASE_DIR / "Structured XOSC generated"
+UNSTRUCTURED_GENERATED_DIR = BASE_DIR / "Unstructured XOSC generated"
+STRUCTURED_GENERATED_DIR.mkdir(exist_ok=True)
+UNSTRUCTURED_GENERATED_DIR.mkdir(exist_ok=True)
+
+# Maps the frontend "variant" string to its output directory. Used by the
+# generate, run, download, and list endpoints to route to the correct folder.
+VARIANT_DIRS = {
+    "structured": STRUCTURED_GENERATED_DIR,
+    "unstructured": UNSTRUCTURED_GENERATED_DIR,
+}
+
+# Separate latest-file pointers so Variant A can never run/export Variant B's
+# file (and vice versa). The road (.xodr) is always fabriksgatan, so it stays shared.
+LATEST_STRUCTURED_XOSC_PATH = None
+LATEST_UNSTRUCTURED_XOSC_PATH = None
 LATEST_XODR_PATH = None  # the road (.xodr) file used by the latest scenario
+
+# Per-variant MP4 output folders (kept separate, never mixed). Auto-created.
+STRUCTURED_VIDEO_DIR = BASE_DIR / "Structured Output Videos"
+UNSTRUCTURED_VIDEO_DIR = BASE_DIR / "Unstructured Output Videos"
+STRUCTURED_VIDEO_DIR.mkdir(exist_ok=True)
+UNSTRUCTURED_VIDEO_DIR.mkdir(exist_ok=True)
+VARIANT_VIDEO_DIRS = {
+    "structured": STRUCTURED_VIDEO_DIR,
+    "unstructured": UNSTRUCTURED_VIDEO_DIR,
+}
+
+# --- Recording config -------------------------------------------------------
+# esmini's own --capture_screen produces no frames on this prebuilt demo binary,
+# so recording is done by capturing the live esmini window with FFmpeg's gdigrab.
+# This requires the esmini window to stay visible on-screen for the whole capture.
+RECORDING_FPS = 30
+ESMINI_WARMUP_SECONDS = 3.0          # let esmini open + load the 3D scene before capture
+RECORDING_BUFFER_SECONDS = 2.0       # extra capture after the scenario StopTrigger time
+DEFAULT_RECORDING_TIMEOUT_SECONDS = 90  # hard safety cap on total FFmpeg wall time
+# Fixed on-screen window so gdigrab always finds a visible, known-size target.
+ESMINI_RECORD_WINDOW = ("60", "60", "1280", "720")  # x, y, w, h
+ESMINI_WINDOW_TITLE = os.getenv("ESMINI_WINDOW_TITLE", "esmini")
 
 PROJECT_DIR = BASE_DIR.parents[2]
 ESMINI_DEMO_DIR = PROJECT_DIR / "03_esmini" / "esmini-demo"
@@ -875,12 +921,13 @@ def build_headlights(data: ScenarioRequest, entity_names: list[str]) -> str:
             </ManeuverGroup>'''
 
 
-def build_scenario_filename(data: ScenarioRequest) -> str:
-    # Keep versioning sequential and readable.
+def build_scenario_filename(data: ScenarioRequest, output_dir: Path) -> str:
+    # Keep versioning sequential and readable. The next index is computed ONLY
+    # from files inside output_dir, so each variant folder numbers independently.
     max_index = 0
     name_pattern = re.compile(r"scenario_(\d{3})_.*\.xosc")
 
-    for path in GENERATED_DIR.glob("scenario_*.xosc"):
+    for path in output_dir.glob("scenario_*.xosc"):
         match = name_pattern.match(path.name)
         if match:
             max_index = max(max_index, int(match.group(1)))
@@ -892,39 +939,60 @@ def build_scenario_filename(data: ScenarioRequest) -> str:
     return f"scenario_{next_index:03d}_{data.egoSpeed}kmh_{data.trafficVehicles}traffic_{safe_weather}{improved_tag}_{timestamp}.xosc"
 
 
-def get_current_xosc_path() -> Path | None:
-    global LATEST_XOSC_PATH
-    if LATEST_XOSC_PATH and LATEST_XOSC_PATH.exists():
-        return LATEST_XOSC_PATH
+def get_current_xosc_path(variant: str) -> Path | None:
+    """
+    Latest generated XOSC for one variant ONLY. Returns the variant's own latest
+    pointer, else the newest file in that variant's folder. Never reads the other
+    variant's folder, so Run/Export can't cross variants.
+    """
+    global LATEST_STRUCTURED_XOSC_PATH, LATEST_UNSTRUCTURED_XOSC_PATH
 
-    candidates = sorted(GENERATED_DIR.glob("scenario_*.xosc"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if variant == "structured":
+        if LATEST_STRUCTURED_XOSC_PATH and LATEST_STRUCTURED_XOSC_PATH.exists():
+            return LATEST_STRUCTURED_XOSC_PATH
+    elif variant == "unstructured":
+        if LATEST_UNSTRUCTURED_XOSC_PATH and LATEST_UNSTRUCTURED_XOSC_PATH.exists():
+            return LATEST_UNSTRUCTURED_XOSC_PATH
+
+    output_dir = VARIANT_DIRS.get(variant)
+    if output_dir is None:
+        return None
+
+    candidates = sorted(output_dir.glob("scenario_*.xosc"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not candidates:
         return None
 
-    LATEST_XOSC_PATH = candidates[0]
-    return LATEST_XOSC_PATH
+    if variant == "structured":
+        LATEST_STRUCTURED_XOSC_PATH = candidates[0]
+    else:
+        LATEST_UNSTRUCTURED_XOSC_PATH = candidates[0]
+    return candidates[0]
 
 
-def generate_and_save(data: ScenarioRequest) -> dict:
+def generate_and_save(data: ScenarioRequest, output_dir: Path, variant: str) -> dict:
     """
-    Shared generation path for BOTH variants (structured dropdowns and unstructured
-    natural language). Builds the XOSC via build_xosc_preview, saves a versioned
-    file, tracks the latest xosc/xodr for Run/Export, and returns the core result.
-    The two endpoints add their own pipeline_log on top.
+    Shared generation path for both variants. The caller passes the explicit
+    output_dir and variant ("structured" / "unstructured") — the folder is never
+    guessed from the prompt. Builds the XOSC, saves a versioned file into
+    output_dir, updates only that variant's latest pointer, and returns the result.
     """
     xosc = build_xosc_preview(data)
-    filename = build_scenario_filename(data)
-    xosc_path = GENERATED_DIR / filename
+    filename = build_scenario_filename(data, output_dir)
+    xosc_path = output_dir / filename
     xosc_path.write_text(xosc, encoding="utf-8")
 
-    global LATEST_XOSC_PATH, LATEST_XODR_PATH
-    LATEST_XOSC_PATH = xosc_path
+    global LATEST_STRUCTURED_XOSC_PATH, LATEST_UNSTRUCTURED_XOSC_PATH, LATEST_XODR_PATH
+    if variant == "structured":
+        LATEST_STRUCTURED_XOSC_PATH = xosc_path
+    else:
+        LATEST_UNSTRUCTURED_XOSC_PATH = xosc_path
     LATEST_XODR_PATH = road_files_for(data)[0]  # road file this scenario uses
 
     num_traffic_vehicles = min(max(data.trafficVehicles, 0), 3)
     actual_actor_count = 2 + num_traffic_vehicles  # Ego + NPC + traffic vehicles
     return {
         "filename": filename,
+        "variant": variant,
         "actors": actual_actor_count,
         "duration": 14.2,
         "improved": data.improve,
@@ -938,7 +1006,8 @@ def generate_and_save(data: ScenarioRequest) -> dict:
 
 @app.post("/generate-scenario")
 def generate_scenario(data: ScenarioRequest):
-    result = generate_and_save(data)
+    # Variant A (structured) always saves into the structured folder.
+    result = generate_and_save(data, STRUCTURED_GENERATED_DIR, "structured")
     npc_speed_ms = result["npcSpeedMs"]
 
     pipeline_log = [
@@ -1173,7 +1242,8 @@ def generate_from_text(req: TextScenarioRequest):
             ],
         }
 
-    result = generate_and_save(data)
+    # Variant B (unstructured) always saves into the unstructured folder.
+    result = generate_and_save(data, UNSTRUCTURED_GENERATED_DIR, "unstructured")
     result["ok"] = True
     result["parsed"] = parsed
     result["parserUsed"] = parser_used
@@ -1322,14 +1392,16 @@ def refine_scenario(data: RefineRequest):
 
     changes = [f"{label}: {original[f]} → {merged[f]}" for f, label in fields if str(original[f]) != str(merged[f])]
 
+    # Refine belongs to Variant A only — save into the structured folder and
+    # update the structured latest pointer.
     refined = data.model_copy(update=merged)
     xosc = build_xosc_preview(refined)
-    filename = build_scenario_filename(refined)
-    xosc_path = GENERATED_DIR / filename
+    filename = build_scenario_filename(refined, STRUCTURED_GENERATED_DIR)
+    xosc_path = STRUCTURED_GENERATED_DIR / filename
     xosc_path.write_text(xosc, encoding="utf-8")
 
-    global LATEST_XOSC_PATH, LATEST_XODR_PATH
-    LATEST_XOSC_PATH = xosc_path
+    global LATEST_STRUCTURED_XOSC_PATH, LATEST_XODR_PATH
+    LATEST_STRUCTURED_XOSC_PATH = xosc_path
     LATEST_XODR_PATH = road_files_for(refined)[0]
 
     num_traffic_vehicles = min(max(refined.trafficVehicles, 0), 3)
@@ -1358,11 +1430,26 @@ def refine_scenario(data: RefineRequest):
     }
 
 
-@app.post("/run-esmini")
-def run_esmini():
-    xosc_path = get_current_xosc_path()
+def resolve_variant_xosc(variant: str) -> Path:
+    """
+    Resolve the latest XOSC for the given variant, or raise a variant-specific
+    404. Never falls back to the other variant's file.
+    """
+    if variant not in VARIANT_DIRS:
+        raise HTTPException(status_code=400, detail="Unknown variant.")
+    xosc_path = get_current_xosc_path(variant)
     if not xosc_path or not xosc_path.exists():
-        raise HTTPException(status_code=404, detail="Generate a scenario first.")
+        noun = "structured" if variant == "structured" else "unstructured"
+        article = "a" if variant == "structured" else "an"
+        raise HTTPException(
+            status_code=404, detail=f"Generate {article} {noun} scenario first."
+        )
+    return xosc_path
+
+
+@app.post("/run-esmini")
+def run_esmini(variant: str = Query("structured")):
+    xosc_path = resolve_variant_xosc(variant)
 
     if not ESMINI_EXE:
         return {
@@ -1383,12 +1470,210 @@ def run_esmini():
 
 
 @app.get("/download-xosc")
-def download_xosc():
-    xosc_path = get_current_xosc_path()
-    if not xosc_path or not xosc_path.exists():
-        raise HTTPException(status_code=404, detail="Generate a scenario first.")
-
+def download_xosc(variant: str = Query("structured")):
+    xosc_path = resolve_variant_xosc(variant)
     return FileResponse(str(xosc_path), filename=xosc_path.name)
+
+
+# ---------------------------------------------------------------------------
+# Video recording (FFmpeg gdigrab window capture)
+# ---------------------------------------------------------------------------
+class RecordRequest(BaseModel):
+    variant: str
+    # Exact XOSC filename to record. Empty => use that variant's latest file.
+    filename: str = ""
+
+
+def find_ffmpeg() -> str | None:
+    """
+    Locate ffmpeg: explicit FFMPEG_EXE override, then PATH, then the winget
+    install location (Gyan.FFmpeg) so it works before a shell PATH refresh.
+    """
+    env = os.getenv("FFMPEG_EXE")
+    if env and Path(env).exists():
+        return env
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    local = os.getenv("LOCALAPPDATA", "")
+    if local:
+        matches = list(
+            (Path(local) / "Microsoft" / "WinGet" / "Packages").glob(
+                "Gyan.FFmpeg*/**/bin/ffmpeg.exe"
+            )
+        )
+        if matches:
+            return str(matches[0])
+    return None
+
+
+def _no_scenario_detail(variant: str) -> str:
+    article = "a" if variant == "structured" else "an"
+    return f"Generate {article} {variant} scenario first."
+
+
+def resolve_variant_xosc_file(variant: str, filename: str) -> Path:
+    """
+    Resolve the XOSC to record for a variant. With a filename, it must be a bare
+    name resolving INSIDE that variant's folder (blocks path traversal). Without
+    one, falls back to the variant's own latest file. Never reads the other variant.
+    """
+    output_dir = VARIANT_DIRS.get(variant)
+    if output_dir is None:
+        raise HTTPException(status_code=400, detail="Unknown variant.")
+
+    if not filename:
+        path = get_current_xosc_path(variant)
+        if not path or not path.exists():
+            raise HTTPException(status_code=404, detail=_no_scenario_detail(variant))
+        return path
+
+    if filename != Path(filename).name:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+    candidate = (output_dir / filename).resolve()
+    if candidate.parent != output_dir.resolve():
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+    if candidate.suffix.lower() != ".xosc" or not candidate.exists():
+        raise HTTPException(status_code=404, detail=_no_scenario_detail(variant))
+    return candidate
+
+
+def parse_scenario_stop_time(xosc_text: str) -> float:
+    """Read the StopTrigger SimulationTimeCondition value (seconds); default 20."""
+    match = re.search(
+        r'<StopTrigger>.*?<SimulationTimeCondition\s+value="([\d.]+)"',
+        xosc_text, re.DOTALL,
+    )
+    try:
+        return float(match.group(1)) if match else 20.0
+    except (TypeError, ValueError):
+        return 20.0
+
+
+def unique_video_path(video_dir: Path, mp4_name: str) -> Path:
+    """Never overwrite: scenario.mp4 -> scenario_recording_02.mp4 -> _03 -> ..."""
+    candidate = video_dir / mp4_name
+    if not candidate.exists():
+        return candidate
+    stem = Path(mp4_name).stem
+    index = 2
+    while True:
+        alt = video_dir / f"{stem}_recording_{index:02d}.mp4"
+        if not alt.exists():
+            return alt
+        index += 1
+
+
+@app.post("/record-esmini")
+def record_esmini(req: RecordRequest):
+    """
+    Launch esmini for the selected scenario and capture its window to an MP4 with
+    FFmpeg gdigrab. The video is named after the XOSC and saved in the variant's
+    own video folder. Returns the video filename, or a clear error (never a
+    zero-byte file, never the other variant's video).
+    """
+    variant = req.variant
+    if variant not in VARIANT_VIDEO_DIRS:
+        raise HTTPException(status_code=400, detail="Unknown variant.")
+
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        raise HTTPException(
+            status_code=400,
+            detail="FFmpeg not found. Install FFmpeg to enable video recording.",
+        )
+
+    if not ESMINI_EXE or not Path(ESMINI_EXE).exists():
+        raise HTTPException(status_code=400, detail="esmini executable not configured.")
+
+    xosc_path = resolve_variant_xosc_file(variant, req.filename)
+
+    video_dir = VARIANT_VIDEO_DIRS[variant]
+    video_path = unique_video_path(video_dir, xosc_path.with_suffix(".mp4").name)
+
+    stop_time = parse_scenario_stop_time(xosc_path.read_text(encoding="utf-8"))
+    duration = round(stop_time + RECORDING_BUFFER_SECONDS, 2)
+
+    # Start esmini with a fixed, on-screen window so gdigrab has a visible target.
+    try:
+        esmini_proc = subprocess.Popen([
+            ESMINI_EXE, "--osc", str(xosc_path),
+            "--camera_mode", "orbit",
+            "--window", *ESMINI_RECORD_WINDOW,
+        ])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not start esmini: {exc}")
+
+    def _stop_esmini():
+        if esmini_proc.poll() is None:
+            esmini_proc.terminate()
+            try:
+                esmini_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                esmini_proc.kill()
+
+    # Let esmini open and load the scene before capturing.
+    time.sleep(ESMINI_WARMUP_SECONDS)
+    if esmini_proc.poll() is not None:
+        raise HTTPException(status_code=500, detail="esmini exited before recording could start.")
+
+    def _run_ffmpeg(input_args: list[str]) -> subprocess.CompletedProcess:
+        cmd = [
+            ffmpeg, "-y",
+            "-f", "gdigrab", "-framerate", str(RECORDING_FPS),
+            "-t", str(duration),
+            *input_args,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            str(video_path),
+        ]
+        return subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=DEFAULT_RECORDING_TIMEOUT_SECONDS,
+        )
+
+    try:
+        # Primary: capture just the esmini window by title.
+        result = _run_ffmpeg(["-i", f"title={ESMINI_WINDOW_TITLE}"])
+        if result.returncode != 0 or not video_path.exists() or video_path.stat().st_size == 0:
+            # Fallback: capture the full desktop (window may not match by title).
+            if video_path.exists():
+                video_path.unlink(missing_ok=True)
+            result = _run_ffmpeg(["-i", "desktop"])
+    except subprocess.TimeoutExpired:
+        _stop_esmini()
+        if video_path.exists():
+            video_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="Recording timed out.")
+    finally:
+        _stop_esmini()
+
+    if result.returncode != 0 or not video_path.exists() or video_path.stat().st_size == 0:
+        if video_path.exists():
+            video_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Video recording failed: FFmpeg could not capture the esmini window.",
+        )
+
+    return {
+        "ok": True,
+        "videoFilename": video_path.name,
+        "variant": variant,
+        "message": "Video recording completed.",
+    }
+
+
+@app.get("/download-video")
+def download_video(variant: str = Query("structured"), filename: str = Query(...)):
+    video_dir = VARIANT_VIDEO_DIRS.get(variant)
+    if video_dir is None:
+        raise HTTPException(status_code=400, detail="Unknown variant.")
+    if filename != Path(filename).name:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+    path = (video_dir / filename).resolve()
+    if path.parent != video_dir.resolve() or not path.exists():
+        raise HTTPException(status_code=404, detail="Video not found.")
+    return FileResponse(str(path), filename=path.name, media_type="video/mp4")
 
 
 def get_current_xodr_path() -> Path | None:
@@ -1409,13 +1694,17 @@ def download_xodr():
 
 
 @app.get("/list-scenarios")
-def list_scenarios():
+def list_scenarios(variant: str = Query("structured")):
     """
-    List generated scenarios with their parameters (newest first) so the frontend
-    can compare two versions. Read-only — does not generate, run, or modify files.
-    egoSpeed/trafficVehicles/weather come from the filename; the descriptive
-    parameters come from the XOSC ParameterDeclarations.
+    List generated scenarios for ONE variant (newest first) so the frontend can
+    compare two versions. Read-only. Defaults to "structured" (Variant A's Compare).
+    Never mixes the two variant folders. egoSpeed/trafficVehicles/weather come from
+    the filename; the descriptive parameters come from the XOSC ParameterDeclarations.
     """
+    output_dir = VARIANT_DIRS.get(variant)
+    if output_dir is None:
+        raise HTTPException(status_code=400, detail="Unknown variant.")
+
     filename_pattern = re.compile(r"scenario_\d{3}_(\d+)kmh_(\d+)traffic_(.+)\.xosc")
 
     def param(text: str, name: str):
@@ -1423,7 +1712,7 @@ def list_scenarios():
         return match.group(1) if match else None
 
     scenarios = []
-    for path in sorted(GENERATED_DIR.glob("scenario_*.xosc"),
+    for path in sorted(output_dir.glob("scenario_*.xosc"),
                        key=lambda p: p.stat().st_mtime, reverse=True):
         match = filename_pattern.match(path.name)
         try:
