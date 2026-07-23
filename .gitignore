@@ -39,8 +39,6 @@ Thumbs.db
 *.log
 log.txt
 
-# Per-variant generated scenarios and recorded videos (runtime + study output)
-02_Frontend_Code/narrative-xai-prototype/backend/Structured XOSC generated/
-02_Frontend_Code/narrative-xai-prototype/backend/Unstructured XOSC generated/
-02_Frontend_Code/narrative-xai-prototype/backend/Structured Output Videos/
-02_Frontend_Code/narrative-xai-prototype/backend/Unstructured Output Videos/
+# Per-variant scenario/video output folders are TRACKED (participant study data)
+# at the user's request. Override the global *.zip ignore for the study zip.
+!02_Frontend_Code/narrative-xai-prototype/backend/Structured XOSC generated/Testing Videos XOSC Files.zip

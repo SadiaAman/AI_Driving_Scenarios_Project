@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OpenSCENARIO>
+   <FileHeader revMajor="1"
+               revMinor="2"
+               date="2026-06-07T00:00:00"
+               description="Narrative XAI generated driving scenario"
+               author="Sadia Aman"/>
+
+   <ParameterDeclarations>
+      <ParameterDeclaration name="HostVehicle" parameterType="string" value="car_blue"/>
+      <ParameterDeclaration name="HostSpeed" parameterType="double" value="22.22"/>
+      <ParameterDeclaration name="PedestrianSpeed" parameterType="double" value="1.5"/>
+      <ParameterDeclaration name="WeatherCondition" parameterType="string" value="clear"/>
+      <ParameterDeclaration name="NPCType" parameterType="string" value="car"/>
+      <ParameterDeclaration name="NPCBehaviour" parameterType="string" value="brakes suddenly"/>
+      <ParameterDeclaration name="EgoResponse" parameterType="string" value="steers to avoid"/>
+      <ParameterDeclaration name="Improved" parameterType="boolean" value="false"/>
+      <ParameterDeclaration name="NpcSpeed" parameterType="double" value="8.33"/>
+   </ParameterDeclarations>
+
+   <CatalogLocations>
+      <RouteCatalog>
+         <Directory path="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/xosc/Catalogs/Routes"/>
+      </RouteCatalog>
+      <VehicleCatalog>
+         <Directory path="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/xosc/Catalogs/Vehicles"/>
+      </VehicleCatalog>
+   </CatalogLocations>
+
+   <RoadNetwork>
+      <LogicFile filepath="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/xodr/fabriksgatan.xodr"/>
+      <SceneGraphFile filepath="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/models/fabriksgatan.osgb"/>
+   </RoadNetwork>
+
+   <Entities>
+   <ScenarioObject name="Ego">
+      <CatalogReference catalogName="VehicleCatalog" entryName="$HostVehicle" />
+   </ScenarioObject>
+   <ScenarioObject name="NPC">
+      <CatalogReference catalogName="VehicleCatalog" entryName="car_yellow" />
+   </ScenarioObject>
+</Entities>
+
+   <Storyboard>
+      <Init>
+         <Actions>
+            <GlobalAction>
+   <EnvironmentAction>
+      <Environment name="GeneratedEnvironment">
+         <TimeOfDay animation="false" dateTime="2026-06-07T12:00:00" />
+         <Weather fractionalCloudCover="zeroOktas">
+            <Sun azimuth="0.0" illuminance="100000.0" elevation="1.31" />
+            <Fog visualRange="100000" />
+            <Precipitation precipitationType="dry" precipitationIntensity="0.0" />
+         </Weather>
+         <RoadCondition frictionScaleFactor="1.0" />
+      </Environment>
+   </EnvironmentAction>
+</GlobalAction>
+
+            <Private entityRef="Ego">
+   <PrivateAction>
+      <RoutingAction>
+         <AssignRouteAction>
+            <CatalogReference catalogName="RoutesAtFabriksgatan" entryName="HostStraightRoute" />
+         </AssignRouteAction>
+      </RoutingAction>
+   </PrivateAction>
+   <PrivateAction>
+      <TeleportAction>
+         <Position>
+            <RoutePosition>
+               <RouteRef>
+                  <CatalogReference catalogName="RoutesAtFabriksgatan" entryName="HostStraightRoute" />
+               </RouteRef>
+               <Orientation />
+               <InRoutePosition>
+                  <FromLaneCoordinates pathS="0.0" laneId="1" laneOffset="0.0" />
+               </InRoutePosition>
+            </RoutePosition>
+         </Position>
+      </TeleportAction>
+   </PrivateAction>
+   <PrivateAction>
+      <LongitudinalAction>
+         <SpeedAction>
+            <SpeedActionDynamics dynamicsShape="step" value="0.0" dynamicsDimension="time" />
+            <SpeedActionTarget>
+               <AbsoluteTargetSpeed value="22.22" />
+            </SpeedActionTarget>
+         </SpeedAction>
+      </LongitudinalAction>
+   </PrivateAction>
+</Private>
+
+            <Private entityRef="NPC">
+               <PrivateAction>
+                  <TeleportAction>
+                     <Position>
+                        <RoutePosition>
+                           <RouteRef>
+                              <CatalogReference catalogName="RoutesAtFabriksgatan" entryName="HostStraightRoute"/>
+                           </RouteRef>
+                           <InRoutePosition>
+                              <FromLaneCoordinates pathS="25" laneId="1"/>
+                           </InRoutePosition>
+                        </RoutePosition>
+                     </Position>
+                  </TeleportAction>
+               </PrivateAction>
+               <PrivateAction>
+                  <LongitudinalAction>
+                     <SpeedAction>
+                        <SpeedActionDynamics dynamicsShape="step" value="0.0" dynamicsDimension="time"/>
+                        <SpeedActionTarget>
+                           <AbsoluteTargetSpeed value="8.33"/>
+                        </SpeedActionTarget>
+                     </SpeedAction>
+                  </LongitudinalAction>
+               </PrivateAction>
+            </Private>
+         </Actions>
+      </Init>
+
+      <Story name="GeneratedScenarioStory">
+         <Act name="GeneratedScenarioAct">
+            <ManeuverGroup maximumExecutionCount="1" name="npc_group">
+               <Actors selectTriggeringEntities="false">
+                  <EntityRef entityRef="NPC"/>
+               </Actors>
+               <Maneuver name="npc_maneuver">
+                  <Event maximumExecutionCount="1" name="npc_event" priority="overwrite">
+                     <Action name="npc_behaviour_action">
+                        <PrivateAction>
+                           <LongitudinalAction>
+                              <SpeedAction>
+                                 <SpeedActionDynamics dynamicsShape="linear" value="-6" dynamicsDimension="rate"/>
+                                 <SpeedActionTarget>
+                                    <AbsoluteTargetSpeed value="0"/>
+                                 </SpeedActionTarget>
+                              </SpeedAction>
+                           </LongitudinalAction>
+                        </PrivateAction>
+                     </Action>
+                     <StartTrigger>
+                        <ConditionGroup>
+                           <Condition conditionEdge="rising" delay="0" name="npc_behaviour_condition">
+                              <ByEntityCondition>
+                                 <TriggeringEntities triggeringEntitiesRule="any">
+                                    <EntityRef entityRef="Ego"/>
+                                 </TriggeringEntities>
+                                 <EntityCondition>
+                                    <TraveledDistanceCondition value="8"/>
+                                 </EntityCondition>
+                              </ByEntityCondition>
+                           </Condition>
+                        </ConditionGroup>
+                     </StartTrigger>
+                  </Event>
+               </Maneuver>
+            </ManeuverGroup>
+            <ManeuverGroup maximumExecutionCount="1" name="ego_response_group">
+               <Actors selectTriggeringEntities="false">
+                  <EntityRef entityRef="Ego"/>
+               </Actors>
+               <Maneuver name="ego_response_maneuver">
+                  <Event name="ego_response_event" priority="overwrite">
+                     <Action name="ego_response_steer">
+                        <PrivateAction>
+                           <LateralAction>
+                              <LaneChangeAction>
+                                 <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="2" dynamicsDimension="time"/>
+                                 <LaneChangeTarget>
+                                    <RelativeTargetLane entityRef="Ego" value="1"/>
+                                 </LaneChangeTarget>
+                              </LaneChangeAction>
+                           </LateralAction>
+                        </PrivateAction>
+                     </Action>
+                     <Action name="ego_response_slow">
+                        <PrivateAction>
+                           <LongitudinalAction>
+                              <SpeedAction>
+                                 <SpeedActionDynamics dynamicsShape="linear" value="-3" dynamicsDimension="rate"/>
+                                 <SpeedActionTarget>
+                                    <AbsoluteTargetSpeed value="13.33"/>
+                                 </SpeedActionTarget>
+                              </SpeedAction>
+                           </LongitudinalAction>
+                        </PrivateAction>
+                     </Action>
+                     <StartTrigger>
+                        <ConditionGroup>
+                           <Condition name="ego_response_condition" delay="0" conditionEdge="none">
+                              <ByEntityCondition>
+                                 <TriggeringEntities triggeringEntitiesRule="any">
+                                    <EntityRef entityRef="Ego"/>
+                                 </TriggeringEntities>
+                                 <EntityCondition>
+                                    <RelativeDistanceCondition entityRef="NPC"
+                                                               value="38.9"
+                                                               freespace="true"
+                                                               coordinateSystem="entity"
+                                                               relativeDistanceType="longitudinal"
+                                                               rule="lessThan"/>
+                                 </EntityCondition>
+                              </ByEntityCondition>
+                           </Condition>
+                        </ConditionGroup>
+                     </StartTrigger>
+                  </Event>
+               </Maneuver>
+            </ManeuverGroup>
+
+            <StartTrigger>
+               <ConditionGroup>
+                  <Condition name="ActStartCondition" delay="0" conditionEdge="none">
+                     <ByValueCondition>
+                        <SimulationTimeCondition value="0" rule="greaterThan"/>
+                     </ByValueCondition>
+                  </Condition>
+               </ConditionGroup>
+            </StartTrigger>
+         </Act>
+      </Story>
+
+      <StopTrigger>
+         <ConditionGroup>
+            <Condition name="QuitCondition" delay="0" conditionEdge="rising">
+               <ByValueCondition>
+                  <SimulationTimeCondition value="20" rule="greaterThan"/>
+               </ByValueCondition>
+            </Condition>
+         </ConditionGroup>
+      </StopTrigger>
+   </Storyboard>
+</OpenSCENARIO>

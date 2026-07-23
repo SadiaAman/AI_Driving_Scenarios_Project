@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OpenSCENARIO>
+   <FileHeader revMajor="1"
+               revMinor="2"
+               date="2026-06-07T00:00:00"
+               description="Narrative XAI generated driving scenario"
+               author="Sadia Aman"/>
+
+   <ParameterDeclarations>
+      <ParameterDeclaration name="HostVehicle" parameterType="string" value="car_blue"/>
+      <ParameterDeclaration name="HostSpeed" parameterType="double" value="8.33"/>
+      <ParameterDeclaration name="PedestrianSpeed" parameterType="double" value="1.5"/>
+      <ParameterDeclaration name="WeatherCondition" parameterType="string" value="rain"/>
+      <ParameterDeclaration name="NPCType" parameterType="string" value="pedestrian"/>
+      <ParameterDeclaration name="NPCBehaviour" parameterType="string" value="crosses the road"/>
+      <ParameterDeclaration name="EgoResponse" parameterType="string" value="brakes immediately"/>
+      <ParameterDeclaration name="Improved" parameterType="boolean" value="false"/>
+      <ParameterDeclaration name="NpcSpeed" parameterType="double" value="1.39"/>
+   </ParameterDeclarations>
+
+   <CatalogLocations>
+      <RouteCatalog>
+         <Directory path="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/xosc/Catalogs/Routes"/>
+      </RouteCatalog>
+      <VehicleCatalog>
+         <Directory path="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/xosc/Catalogs/Vehicles"/>
+      </VehicleCatalog>
+   </CatalogLocations>
+
+   <RoadNetwork>
+      <LogicFile filepath="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/xodr/fabriksgatan.xodr"/>
+      <SceneGraphFile filepath="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/models/fabriksgatan.osgb"/>
+   </RoadNetwork>
+
+   <Entities>
+   <ScenarioObject name="Ego">
+      <CatalogReference catalogName="VehicleCatalog" entryName="$HostVehicle" />
+   </ScenarioObject>
+   <ScenarioObject name="NPC">
+      <Pedestrian name="NPC" pedestrianCategory="pedestrian" model3d="D:/University_Projects/AI_Driving_Scenarios_Project/03_esmini/esmini-demo/resources/models/walkman.osgb" mass="80.0">
+         <BoundingBox>
+            <Center x="0.06" y="0.0" z="0.923" />
+            <Dimensions width="0.5" length="0.6" height="1.8" />
+         </BoundingBox>
+         <Properties>
+            <Property name="scaleMode" value="BBToModel" />
+         </Properties>
+      </Pedestrian>
+   </ScenarioObject>
+</Entities>
+
+   <Storyboard>
+      <Init>
+         <Actions>
+            <GlobalAction>
+   <EnvironmentAction>
+      <Environment name="GeneratedEnvironment">
+         <TimeOfDay animation="false" dateTime="2026-06-07T12:00:00" />
+         <Weather fractionalCloudCover="eightOktas">
+            <Sun azimuth="0.0" illuminance="40000.0" elevation="1.31" />
+            <Fog visualRange="800" />
+            <Precipitation precipitationType="rain" precipitationIntensity="0.7" />
+         </Weather>
+         <RoadCondition frictionScaleFactor="0.7" />
+      </Environment>
+   </EnvironmentAction>
+</GlobalAction>
+
+            <Private entityRef="Ego">
+   <PrivateAction>
+      <RoutingAction>
+         <AssignRouteAction>
+            <CatalogReference catalogName="RoutesAtFabriksgatan" entryName="HostStraightRoute" />
+         </AssignRouteAction>
+      </RoutingAction>
+   </PrivateAction>
+   <PrivateAction>
+      <TeleportAction>
+         <Position>
+            <RoutePosition>
+               <RouteRef>
+                  <CatalogReference catalogName="RoutesAtFabriksgatan" entryName="HostStraightRoute" />
+               </RouteRef>
+               <Orientation />
+               <InRoutePosition>
+                  <FromLaneCoordinates pathS="0.0" laneId="1" laneOffset="0.0" />
+               </InRoutePosition>
+            </RoutePosition>
+         </Position>
+      </TeleportAction>
+   </PrivateAction>
+   <PrivateAction>
+      <LongitudinalAction>
+         <SpeedAction>
+            <SpeedActionDynamics dynamicsShape="step" value="0.0" dynamicsDimension="time" />
+            <SpeedActionTarget>
+               <AbsoluteTargetSpeed value="8.33" />
+            </SpeedActionTarget>
+         </SpeedAction>
+      </LongitudinalAction>
+   </PrivateAction>
+</Private>
+
+            <Private entityRef="NPC">
+               <PrivateAction>
+                  <TeleportAction>
+                     <Position>
+                        <LanePosition laneId="3" offset="0.5" roadId="0" s="15">
+                           <Orientation type="relative" h="0" p="0" r="0"/>
+                        </LanePosition>
+                     </Position>
+                  </TeleportAction>
+               </PrivateAction>
+            </Private>
+         </Actions>
+      </Init>
+
+      <Story name="GeneratedScenarioStory">
+         <Act name="GeneratedScenarioAct">
+            <ManeuverGroup maximumExecutionCount="1" name="npc_group">
+               <Actors selectTriggeringEntities="false">
+                  <EntityRef entityRef="NPC"/>
+               </Actors>
+               <Maneuver name="npc_maneuver">
+                  <Event maximumExecutionCount="1" name="npc_event" priority="overwrite">
+                     <Action name="npc_cross_speed">
+                        <PrivateAction>
+                           <LongitudinalAction>
+                              <SpeedAction>
+                                 <SpeedActionDynamics dynamicsShape="linear" value="2" dynamicsDimension="rate"/>
+                                 <SpeedActionTarget>
+                                    <AbsoluteTargetSpeed value="1.39"/>
+                                 </SpeedActionTarget>
+                              </SpeedAction>
+                           </LongitudinalAction>
+                        </PrivateAction>
+                     </Action>
+                     <Action name="npc_cross_route">
+                        <PrivateAction>
+                           <RoutingAction>
+                              <FollowTrajectoryAction>
+                                 <Trajectory closed="false" name="npc_crossing_trajectory">
+                                    <ParameterDeclarations/>
+                                    <Shape>
+                                       <Polyline>
+                                          <Vertex><Position><LanePosition laneId="3" offset="0.5" roadId="0" s="15"><Orientation type="relative" h="0" p="0" r="0"/></LanePosition></Position></Vertex>
+                                          <Vertex><Position><LanePosition laneId="3" offset="0.5" roadId="0" s="10.5"><Orientation type="relative" h="0" p="0" r="0"/></LanePosition></Position></Vertex>
+                                          <Vertex><Position><LanePosition laneId="3" offset="0.0" roadId="0" s="10"><Orientation type="relative" h="1.57" p="0" r="0"/></LanePosition></Position></Vertex>
+                                          <Vertex><Position><LanePosition laneId="-3" offset="0.0" roadId="0" s="10"><Orientation type="relative" h="4.71" p="0" r="0"/></LanePosition></Position></Vertex>
+                                          <Vertex><Position><LanePosition laneId="-3" offset="-0.5" roadId="0" s="9.5"><Orientation type="relative" h="3.14" p="0" r="0"/></LanePosition></Position></Vertex>
+                                          <Vertex><Position><LanePosition laneId="-3" offset="-0.5" roadId="0" s="7.5"><Orientation type="relative" h="3.14" p="0" r="0"/></LanePosition></Position></Vertex>
+                                       </Polyline>
+                                    </Shape>
+                                 </Trajectory>
+                                 <TimeReference><None/></TimeReference>
+                                 <TrajectoryFollowingMode followingMode="follow"/>
+                              </FollowTrajectoryAction>
+                           </RoutingAction>
+                        </PrivateAction>
+                     </Action>
+                     <StartTrigger>
+                        <ConditionGroup>
+                           <Condition conditionEdge="rising" delay="0" name="npc_cross_condition">
+                              <ByEntityCondition>
+                                 <TriggeringEntities triggeringEntitiesRule="any">
+                                    <EntityRef entityRef="Ego"/>
+                                 </TriggeringEntities>
+                                 <EntityCondition>
+                                    <TraveledDistanceCondition value="5"/>
+                                 </EntityCondition>
+                              </ByEntityCondition>
+                           </Condition>
+                        </ConditionGroup>
+                     </StartTrigger>
+                  </Event>
+               </Maneuver>
+            </ManeuverGroup>
+            <ManeuverGroup maximumExecutionCount="1" name="ego_response_group">
+               <Actors selectTriggeringEntities="false">
+                  <EntityRef entityRef="Ego"/>
+               </Actors>
+               <Maneuver name="ego_response_maneuver">
+                  <Event name="ego_response_event" priority="overwrite">
+                     <Action name="ego_response_action">
+                        <PrivateAction>
+                           <LongitudinalAction>
+                              <SpeedAction>
+                                 <SpeedActionDynamics dynamicsShape="linear" value="-8" dynamicsDimension="rate"/>
+                                 <SpeedActionTarget>
+                                    <AbsoluteTargetSpeed value="0"/>
+                                 </SpeedActionTarget>
+                              </SpeedAction>
+                           </LongitudinalAction>
+                        </PrivateAction>
+                     </Action>
+                     <StartTrigger>
+                        <ConditionGroup>
+                           <Condition name="ego_response_condition" delay="0" conditionEdge="none">
+                              <ByEntityCondition>
+                                 <TriggeringEntities triggeringEntitiesRule="any">
+                                    <EntityRef entityRef="Ego"/>
+                                 </TriggeringEntities>
+                                 <EntityCondition>
+                                    <RelativeDistanceCondition entityRef="NPC"
+                                                               value="12.3"
+                                                               freespace="true"
+                                                               coordinateSystem="entity"
+                                                               relativeDistanceType="longitudinal"
+                                                               rule="lessThan"/>
+                                 </EntityCondition>
+                              </ByEntityCondition>
+                           </Condition>
+                        </ConditionGroup>
+                     </StartTrigger>
+                  </Event>
+               </Maneuver>
+            </ManeuverGroup>
+
+            <StartTrigger>
+               <ConditionGroup>
+                  <Condition name="ActStartCondition" delay="0" conditionEdge="none">
+                     <ByValueCondition>
+                        <SimulationTimeCondition value="0" rule="greaterThan"/>
+                     </ByValueCondition>
+                  </Condition>
+               </ConditionGroup>
+            </StartTrigger>
+         </Act>
+      </Story>
+
+      <StopTrigger>
+         <ConditionGroup>
+            <Condition name="QuitCondition" delay="0" conditionEdge="rising">
+               <ByValueCondition>
+                  <SimulationTimeCondition value="20" rule="greaterThan"/>
+               </ByValueCondition>
+            </Condition>
+         </ConditionGroup>
+      </StopTrigger>
+   </Storyboard>
+</OpenSCENARIO>
